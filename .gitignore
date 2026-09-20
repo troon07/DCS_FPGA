@@ -1,0 +1,22 @@
+# Generated Python, Vivado, compiler, and hardware-capture artifacts
+.venv/
+.Xil/
+__pycache__/
+*.py[cod]
+build/
+tv/
+hw/vivado/build/
+vivado_board_preset_test/
+vivado_board_query_project/
+*.jou
+*.log
+*.str
+*.backup.*
+*.vvp
+
+# Locally built or captured board artifacts
+sw/ldacs_decode
+sw/test_host
+sw/*.elf
+hw_out.bin
+tv_*.bin

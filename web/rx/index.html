@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Latest LDACS Hardware Result</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="brand">
+    <h1>Latest hardware result</h1>
+    <p>Read-only view · refreshed from the most recent COM5 transaction</p>
+  </div>
+  <nav class="nav"><a href="/tx/index.html">Transmit</a><a class="active" href="/rx/index.html">Latest result</a></nav>
+  <div id="resultStatus" class="status">Waiting for result</div>
+</header>
+
+<main class="container stack">
+  <div id="empty" class="card empty">Send a frame from the Transmit page to display a board result.</div>
+  <section id="content" class="stack hidden">
+    <div class="card">
+      <h2>Payload comparison</h2>
+      <p class="intro">Received content is populated only from a valid board response.</p>
+      <div class="message-pair">
+        <div class="message-box"><strong>Sent</strong><pre id="sent"></pre></div>
+        <div id="receivedBox" class="message-box"><strong>Received from hardware</strong><pre id="received"></pre></div>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div id="latency" class="value">—</div><div class="label">Measured COM5 round trip</div></div>
+      <div class="metric"><div id="rate" class="value">—</div><div class="label">Measured effective payload rate</div></div>
+      <div class="metric"><div id="mismatch" class="value">—</div><div class="label">Hardware byte mismatches</div></div>
+      <div class="metric"><div id="rs" class="value">—</div><div class="label">RS corrections / failures</div></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Hardware evidence</h2>
+        <div class="kv">
+          <div>Device</div><div id="device">—</div>
+          <div>Mode</div><div id="mode">—</div>
+          <div>Coded bits transmitted</div><div id="bits">—</div>
+          <div>Frame payload returned</div><div id="bytes">—</div>
+          <div>COM port</div><div>COM5 · 115200 baud</div>
+          <div>Implemented PL clock</div><div id="clock">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Software cross-check</h2>
+        <p class="intro">The complete software decoder processes the exact frame sent to the board.</p>
+        <div class="check-grid">
+          <div class="check"><div class="name">Hardware vs input</div><div id="inputCheck" class="result">—</div></div>
+          <div class="check"><div class="name">Hardware vs software</div><div id="modelCheck" class="result">—</div></div>
+          <div class="check"><div class="name">Software vs input</div><div id="softwareInputCheck" class="result">—</div></div>
+        </div>
+        <div class="kv">
+          <div>Measured software decode time</div><div id="softwareTime">—</div>
+          <div>Software RS corrections / failures</div><div id="softwareRs">—</div>
+        </div>
+        <p class="footnote">This comparison uses the same SPEC-CHECK values on both paths. It does not independently validate those values.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="../shared/app.js"></script>
+<script>
+const API = location.origin;
+async function refresh() {
+  const status = document.getElementById('resultStatus');
+  try {
+    const response = await fetch(`${API}/api/last_result`, {cache: 'no-store'});
+    const data = await response.json();
+    if (data.status !== 'success' || !data.hw_active) { status.className = 'status'; status.textContent = 'No hardware result'; return; }
+    render(data); status.className = 'status live'; status.textContent = 'Valid COM5 response';
+  } catch (_) { status.className = 'status error'; status.textContent = 'Server unavailable'; }
+}
+function render(data) {
+  const sw = data.software_crosscheck || {};
+  document.getElementById('empty').classList.add('hidden');
+  document.getElementById('content').classList.remove('hidden');
+  document.getElementById('sent').textContent = data.input_text || '';
+  document.getElementById('received').textContent = data.recovered_text || '';
+  document.getElementById('receivedBox').classList.toggle('good', Boolean(data.is_bit_exact));
+  document.getElementById('latency').textContent = `${fixed(data.latency_ms, 3)} ms`;
+  document.getElementById('rate').textContent = `${fixed(data.throughput_mbps, 3)} Mb/s`;
+  document.getElementById('mismatch').textContent = data.byte_mismatches ?? '—';
+  document.getElementById('rs').textContent = `${data.rs_corrections ?? '—'} / ${data.rs_fails ?? '—'}`;
+  document.getElementById('device').textContent = data.device || '—';
+  document.getElementById('mode').textContent = data.mode || '—';
+  document.getElementById('bits').textContent = Number(data.coded_bits || 0).toLocaleString();
+  document.getElementById('bytes').textContent = `${Number(data.frame_payload_bytes || 0).toLocaleString()} B`;
+  document.getElementById('clock').textContent = `${fixed(data.clock_mhz, 3)} MHz`;
+  setCheck('inputCheck', data.is_bit_exact, data.is_bit_exact ? 'PASS' : 'FAIL');
+  setCheck('modelCheck', sw.matches_hardware, sw.matches_hardware ? 'PASS' : 'FAIL');
+  setCheck('softwareInputCheck', sw.software_matches_input, sw.software_matches_input ? 'PASS' : 'FAIL');
+  document.getElementById('softwareTime').textContent = sw.measured_decode_ms == null ? '—' : `${fixed(sw.measured_decode_ms, 3)} ms`;
+  document.getElementById('softwareRs').textContent = `${sw.software_rs_corrections ?? '—'} / ${sw.software_rs_failures ?? '—'}`;
+}
+function setCheck(id, pass, text) { const element = document.getElementById(id); element.className = `result ${pass ? 'pass' : 'fail'}`; element.textContent = text; }
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

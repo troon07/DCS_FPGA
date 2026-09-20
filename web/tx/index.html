@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LDACS Hardware Console</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="brand">
+    <h1>LDACS hardware console</h1>
+    <p>EDGE Z7-10 · XC7Z010 · measured board data only</p>
+  </div>
+  <nav class="nav"><a class="active" href="/tx/index.html">Transmit</a><a href="/rx/index.html">Latest result</a></nav>
+  <div id="boardStatus" class="status">Checking COM5</div>
+</header>
+
+<main class="container stack">
+  <section class="grid">
+    <div class="card">
+      <h2>Send a frame</h2>
+      <p class="intro">The frame is encoded on the PC, sent through COM5, processed by the Zynq PS/PL pipeline, and returned through COM5.</p>
+      <div class="field">
+        <label for="message">Message</label>
+        <textarea id="message">HARDWARE LOOPBACK TEST</textarea>
+      </div>
+      <div class="field">
+        <label for="mode">Frame mode</label>
+        <select id="mode">
+          <option value="qpsk_1_2">QPSK 1/2 · 9,768 coded bits</option>
+          <option value="qpsk_2_3">QPSK 2/3 · 9,768 coded bits</option>
+          <option value="qpsk_3_4">QPSK 3/4 · 9,768 coded bits</option>
+          <option value="16qam_1_2">16QAM 1/2 · 19,536 coded bits</option>
+          <option value="16qam_2_3">16QAM 2/3 · 19,536 coded bits</option>
+          <option value="64qam_1_2">64QAM 1/2 · 29,304 coded bits</option>
+          <option value="64qam_2_3">64QAM 2/3 · 29,304 coded bits</option>
+          <option value="64qam_3_4">64QAM 3/4 · 29,304 coded bits</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button id="sendButton" class="primary" onclick="sendFrame()">Send through hardware</button>
+        <button id="bootButton" class="secondary" onclick="bootBoard()">Program and boot board</button>
+      </div>
+      <div id="notice" class="notice"></div>
+      <p class="footnote">No artificial SNR, random constellation, injected errors, or substituted output is used by this page.</p>
+    </div>
+
+    <div class="card">
+      <h2>Hardware evidence</h2>
+      <p class="intro">Fixed configuration and build values from the currently programmed design.</p>
+      <div class="kv">
+        <div>Device</div><div>XC7Z010CLG400-1</div>
+        <div>Serial link</div><div>COM5 · 115200 8N1</div>
+        <div>Implemented PL clock</div><div>71.429 MHz</div>
+        <div>Decoder in PL</div><div>Viterbi · block deinterleaver · RS</div>
+        <div>Functions in PS</div><div>Helical deinterleaver · derandomizer</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="result" class="stack hidden">
+    <div class="card">
+      <h2>Returned data</h2>
+      <p class="intro">The right-hand value is displayed only after a valid response header and payload arrive from the board.</p>
+      <div class="message-pair">
+        <div class="message-box"><strong>Sent</strong><pre id="sentText"></pre></div>
+        <div id="receivedBox" class="message-box"><strong>Received from hardware</strong><pre id="receivedText"></pre></div>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div id="roundTrip" class="value">—</div><div class="label">Measured COM5 round trip</div></div>
+      <div class="metric"><div id="throughput" class="value">—</div><div class="label">Measured effective payload rate</div></div>
+      <div class="metric"><div id="codedBits" class="value">—</div><div class="label">Coded bits sent</div></div>
+      <div class="metric"><div id="payloadBytes" class="value">—</div><div class="label">Returned frame bytes</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Observed transaction path</h2>
+      <p class="intro">This diagram identifies the components traversed; only the complete UART-to-UART interval is timed.</p>
+      <div class="flow">
+        <div class="node"><strong>PC encoder</strong><span>Software</span></div>
+        <div class="node transport"><strong>COM5 TX</strong><span>UART bytes</span></div>
+        <div class="node hardware"><strong>Zynq PS</strong><span>Helical + DMA</span></div>
+        <div class="node hardware"><strong>FPGA PL</strong><span>Viterbi + BDI + RS</span></div>
+        <div class="node hardware"><strong>Zynq PS</strong><span>Derandomizer</span></div>
+        <div class="node transport"><strong>COM5 RX</strong><span>Returned payload</span></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Validation checks</h2>
+        <p class="intro">Hardware output is checked both against the input and against a complete software decode of the exact transmitted frame.</p>
+        <div class="check-grid">
+          <div class="check"><div class="name">Hardware vs input</div><div id="inputCheck" class="result">—</div></div>
+          <div class="check"><div class="name">Hardware vs full software model</div><div id="softwareCheck" class="result">—</div></div>
+          <div class="check"><div class="name">RS status from hardware</div><div id="rsCheck" class="result">—</div></div>
+        </div>
+        <div class="kv">
+          <div>Hardware byte mismatches</div><div id="hwMismatch">—</div>
+          <div>Hardware RS corrections</div><div id="rsCorrections">—</div>
+          <div>Hardware RS failures</div><div id="rsFailures">—</div>
+          <div>Measured host software decode</div><div id="softwareTime">—</div>
+        </div>
+        <p class="footnote">The software model and hardware use the same SPEC-CHECK constants. A match verifies implementation consistency, not specification conformance.</p>
+      </div>
+
+      <div class="card">
+        <h2>Implemented FPGA resources</h2>
+        <p class="intro">Real values parsed from the routed XC7Z010 Vivado report.</p>
+        <div class="resource"><div class="resource-head"><span>Slice LUTs</span><span>11,031 / 17,600 · 62.68%</span></div><div class="bar"><span style="width:62.68%"></span></div></div>
+        <div class="resource"><div class="resource-head"><span>Slice registers</span><span>5,788 / 35,200 · 16.44%</span></div><div class="bar"><span style="width:16.44%"></span></div></div>
+        <div class="resource"><div class="resource-head"><span>Block RAM tiles</span><span>50.5 / 60 · 84.17%</span></div><div class="bar"><span style="width:84.17%"></span></div></div>
+        <div class="resource"><div class="resource-head"><span>DSPs</span><span>1 / 80 · 1.25%</span></div><div class="bar"><span style="width:1.25%"></span></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="../shared/app.js"></script>
+<script>
+const API = location.origin;
+function showNotice(text, kind = 'info') { const box = document.getElementById('notice'); box.textContent = text; box.className = `notice show ${kind}`; }
+
+async function pollStatus() {
+  const pill = document.getElementById('boardStatus');
+  try {
+    const response = await fetch(`${API}/api/hw/status`, {cache: 'no-store'});
+    const data = await response.json();
+    if (data.com_open) { pill.className = 'status live'; pill.textContent = `COM5 open · ${data.baud} baud`; }
+    else { pill.className = 'status error'; pill.textContent = 'COM5 unavailable'; }
+  } catch (_) { pill.className = 'status error'; pill.textContent = 'Server unavailable'; }
+}
+
+async function bootBoard() {
+  const button = document.getElementById('bootButton'); button.disabled = true;
+  showNotice('Programming the FPGA and starting the ARM firmware…');
+  try {
+    const response = await fetch(`${API}/api/hw/boot`, {method: 'POST', body: '{}'});
+    const data = await response.json();
+    showNotice(data.success ? 'Board programmed and firmware started.' : data.message, data.success ? 'ok' : 'bad');
+  } catch (error) { showNotice(`Boot failed: ${error.message}`, 'bad'); }
+  finally { button.disabled = false; pollStatus(); }
+}
+
+async function sendFrame() {
+  const button = document.getElementById('sendButton');
+  const payload = document.getElementById('message').value;
+  const mode = document.getElementById('mode').value;
+  if (!payload.length) return showNotice('Enter a message first.', 'bad');
+  button.disabled = true; showNotice('Waiting for the real COM5 hardware response…');
+  try {
+    const response = await fetch(`${API}/api/tx/transmit`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({payload, mode}) });
+    const data = await response.json();
+    if (data.status !== 'success' || !data.hw_active) throw new Error(data.message || 'No valid hardware result');
+    renderResult(data);
+    showNotice(data.is_bit_exact ? 'Hardware response received and verified.' : 'Hardware responded with mismatches.', data.is_bit_exact ? 'ok' : 'bad');
+  } catch (error) { document.getElementById('result').classList.add('hidden'); showNotice(error.message, 'bad'); }
+  finally { button.disabled = false; pollStatus(); }
+}
+
+function renderResult(data) {
+  const sw = data.software_crosscheck || {};
+  document.getElementById('result').classList.remove('hidden');
+  document.getElementById('sentText').textContent = data.input_text || '';
+  document.getElementById('receivedText').textContent = data.recovered_text || '';
+  document.getElementById('receivedBox').classList.toggle('good', Boolean(data.is_bit_exact));
+  document.getElementById('roundTrip').textContent = `${fixed(data.latency_ms, 3)} ms`;
+  document.getElementById('throughput').textContent = `${fixed(data.throughput_mbps, 3)} Mb/s`;
+  document.getElementById('codedBits').textContent = Number(data.coded_bits || 0).toLocaleString();
+  document.getElementById('payloadBytes').textContent = `${Number(data.frame_payload_bytes || 0).toLocaleString()} B`;
+  setCheck('inputCheck', data.is_bit_exact, data.is_bit_exact ? 'PASS · bit exact' : 'FAIL');
+  setCheck('softwareCheck', sw.matches_hardware, sw.matches_hardware ? 'PASS · exact match' : 'FAIL');
+  setCheck('rsCheck', data.rs_fails === 0, data.rs_fails === 0 ? 'PASS · no failures' : 'FAIL');
+  document.getElementById('hwMismatch').textContent = data.byte_mismatches ?? '—';
+  document.getElementById('rsCorrections').textContent = data.rs_corrections ?? '—';
+  document.getElementById('rsFailures').textContent = data.rs_fails ?? '—';
+  document.getElementById('softwareTime').textContent = sw.measured_decode_ms == null ? '—' : `${fixed(sw.measured_decode_ms, 3)} ms`;
+  document.getElementById('result').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+function setCheck(id, pass, text) { const element = document.getElementById(id); element.className = `result ${pass ? 'pass' : 'fail'}`; element.textContent = text; }
+pollStatus(); setInterval(pollStatus, 5000);
+</script>
+</body>
+</html>

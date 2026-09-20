@@ -1,0 +1,26 @@
+/*
+ * PetaLinux: project-spec/meta-user/recipes-bsp/device-tree/files/system-user.dtsi
+ *
+ * 1) reserves 64 MB of contiguous memory (CMA) for DMA buffers
+ * 2) creates two u-dma-buf buffers: /dev/udmabuf_tx and /dev/udmabuf_rx (1 MB each)
+ * The u-dma-buf kernel module: https://github.com/ikwzm/udmabuf  (see docs/LINUX_SETUP.md)
+ */
+/include/ "system-conf.dtsi"
+/ {
+    chosen {
+        bootargs = "console=ttyPS0,115200 earlycon root=/dev/mmcblk0p2 rw rootwait cma=64M";
+    };
+
+    udmabuf_tx {
+        compatible  = "ikwzm,u-dma-buf";
+        device-name = "udmabuf_tx";
+        size        = <0x00100000>;
+        sync-mode   = <3>;
+    };
+    udmabuf_rx {
+        compatible  = "ikwzm,u-dma-buf";
+        device-name = "udmabuf_rx";
+        size        = <0x00100000>;
+        sync-mode   = <3>;
+    };
+};

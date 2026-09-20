@@ -1,0 +1,2 @@
+apply_board_connection -help
+exit
