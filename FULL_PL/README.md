@@ -127,3 +127,18 @@ coding/frame profiles; no radio modulation/demodulation is performed here.
 See `../BENCHMARKS/README.md` for the three-way research procedure and comparison
 commands. There are **no new real-board performance results** yet. Vivado power
 reports, when generated, are estimates rather than measured board power.
+
+## Timing audit update
+
+The helical address path now uses registered column counts for the three supported
+coded lengths, replacing the combinational division by 24. Configuration-only
+frame-size products are also registered. Allow two idle PL clocks after the last
+configuration write before starting DMA; the supplied firmware already performs
+DMA reset/programming accesses in this interval. Clock constraints remain unchanged.
+
+The build routes first, records detailed setup/hold paths, checks slack, then
+writes the bitstream and XSA. Boot requires the successful timing-check marker.
+Re-run create_project.tcl and build.tcl for these changes. Functional simulation
+is not proof of timing closure. If routing still fails, inspect
+`hw/vivado/build/setup_paths.rpt` and `timing.rpt`; no false paths or multicycle
+exceptions have been added to suppress the failure.

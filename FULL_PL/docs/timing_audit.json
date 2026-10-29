@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-29",
+  "scope": "static FULL_PL timing remediation",
+  "reported_slack_ns": -5,
+  "failing_path_report_available": false,
+  "vivado_run": false,
+  "timing_closure_confirmed": false,
+  "functional_cases_passed": 15,
+  "clock_target_changed": false,
+  "changes": [
+    "replace helical combinational divide with registered supported-mode geometry before first accepted beat",
+    "narrow helical address counters to required widths",
+    "register configuration frame-length products before TLAST/counter logic",
+    "route/check setup and hold before writing bitstream; emit detailed paths",
+    "invalidate validation verdict at project recreation/build start; boot requires successful verdict"
+  ],
+  "sources": {
+    "hw/rtl/helical_deint.v": "fa6aba699fd2d645a0b9a90ca0665f94be6a1f146e5bda5dfa6807abb3d89b9e",
+    "hw/rtl/ldacs_decoder_top.v": "e93c3ec79541006d75acfa33cd89ea8c4731ff4cae1f723900c023b3beea9de8",
+    "hw/vivado/build.tcl": "8d5fe210e3fef4c811996094b92a74e836f7e12ac9640feb3414f75c94d76bfd",
+    "hw/vivado/create_project.tcl": "e91c04e11894cf75524a08cb32b1c5f57cf5c598e28a0d9d7ca420c6c386c310",
+    "boot_firmware.tcl": "136ddfd6dcbf305f06053662b686ebc9224b6b64781b789190cabd35cead716f"
+  }
+}

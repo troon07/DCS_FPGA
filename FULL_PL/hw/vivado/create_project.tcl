@@ -136,3 +136,8 @@ add_files -norecurse [glob -nocomplain $origin/build/$proj_name/$proj_name.gen/s
 set_property top system_wrapper [current_fileset]
 update_compile_order -fileset sources_1
 puts "INFO: project created: $origin/build/$proj_name/$proj_name.xpr"
+
+# Recreating the project invalidates any earlier successful timing verdict.
+set marker [open $origin/build/timing_validated.txt w]
+puts $marker "FAILED_OR_NOT_RUN"
+close $marker

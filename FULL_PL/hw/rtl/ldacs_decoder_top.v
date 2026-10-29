@@ -67,7 +67,17 @@ module ldacs_decoder_top #(
 
     reg [31:0] hel_cycles,der_cycles;
     wire [7:0] rs_data;
-    wire [15:0] n_payload_bytes = reg_num_cw * (reg_rs_n - NSYM);
+    reg [15:0] n_payload_bytes,n_rs_bytes;
+    // Configuration-only products are registered, so multipliers do not feed
+    // TLAST/ready/counter comparison logic in the same cycle.
+    // Allow two idle clocks after a configuration write before starting DMA.
+    always @(posedge aclk)begin
+        if(!aresetn)begin n_payload_bytes<=16'd546;n_rs_bytes<=16'd606;end
+        else begin
+            n_rs_bytes<=reg_num_cw*reg_rs_n;
+            n_payload_bytes<=reg_num_cw*(reg_rs_n-8'd10);
+        end
+    end
     wire rst = !aresetn || soft_rst;
 
     assign s_axi_ctrl_bresp = 2'b00;
@@ -133,7 +143,7 @@ module ldacs_decoder_top #(
     end
 
     // ---------------- datapath ----------------
-    wire [15:0] n_out_bits = reg_num_cw * reg_rs_n * 8;
+    wire [15:0] n_out_bits = {n_rs_bytes[12:0],3'b000};
 
     wire h_valid,h_ready,h_bit;
     helical_deint u_helical(.clk(aclk),.rst(rst),.cfg_bits(reg_coded_bits),
@@ -196,7 +206,6 @@ module ldacs_decoder_top #(
         (reg_trace_sel==4)?rs_data:der_data;
 
     // ---------------- TLAST + statistics ----------------
-    wire [15:0] n_rs_bytes = reg_num_cw * reg_rs_n;
     wire [15:0] n_out_bytes = (reg_trace_sel==3)?reg_coded_bits:
         (reg_trace_sel==0 || reg_trace_sel==4)?n_payload_bytes:n_rs_bytes;
     reg  [15:0] out_cnt;

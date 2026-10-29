@@ -6,6 +6,11 @@ if {![file exists $psinit]} {
     set psinit [file join $root hw/vivado/build/ldacs_zed/ldacs_zed.srcs/sources_1/bd/system/ip/system_ps7_0/ps7_init.tcl]
 }
 set elf [file join $root sw/uart_bridge.elf]
+set validation [file join $root hw/vivado/build/timing_validated.txt]
+if {![file exists $validation]} {error "Rebuild FULL_PL using the timing-checked build.tcl before programming"}
+set f [open $validation r];set verdict [string trim [read $f]];close $f
+if {$verdict ne "TIMING_PASSED"} {error "FULL_PL timing validation failed; refusing to program stale/failed output"}
+
 foreach required [list $bit $psinit $elf] {if {![file exists $required]} {error "Missing build artifact: $required"}}
 connect
 if {[llength [targets -filter {name =~ "*xc7z010*"}]] == 0} {error "EDGE Z7-10 xc7z010 not found"}
