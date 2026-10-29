@@ -1,0 +1,34 @@
+{
+  "validation_date": "2026-10-29",
+  "board_measurements_performed": false,
+  "original_hybrid_files_unchanged": 81,
+  "ps_c_frame_cases": 24,
+  "direct_rs_cases": 9,
+  "pl_rtl_cases": 15,
+  "protocol_and_comparison_tests": 11,
+  "http_console_checks": [
+    "FULL_PS GET and missing-board POST",
+    "FULL_PL GET and missing-board POST"
+  ],
+  "rtl_simulator": "Icarus Verilog 13.0",
+  "arm_builds": {
+    "FULL_PS": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "dc9c1d547f74e030a98cdd6ec71e227a93ba10ee33d7cae210660ed3c204d9c1"
+    },
+    "FULL_PL": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "fcb6eb81e3b82d422871c8a4b8b40e527c9abea0a63ab2100f42d1efc9c35c65"
+    },
+    "BENCHMARKS/hybrid": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "d02177a8e7cb1769cd79b8316515c9b790b7ccd92cc6b19c56d3c98dd44f8365"
+    }
+  },
+  "pending": [
+    "Vivado project generation",
+    "XC7Z010 synthesis/place/route/resource/timing validation",
+    "Physical board boot and correctness checks",
+    "Three-way real-board benchmark captures"
+  ]
+}

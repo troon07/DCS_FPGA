@@ -1,0 +1,5 @@
+results/
+hybrid/sw/*.elf
+hybrid/sw/*.map
+hybrid/sw/firmware_build.json
+__pycache__/

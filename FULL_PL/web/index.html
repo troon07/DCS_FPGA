@@ -1,0 +1,34 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VARIANT_NAME receiver research console</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:32px auto;padding:0 20px;background:#0b1220;color:#e6edf8}textarea,select,input,button{font:inherit;padding:10px;border:1px solid #40516d;border-radius:6px;background:#152139;color:inherit}textarea{display:block;width:95%;margin:12px 0}button{cursor:pointer;margin:12px 6px 12px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111d30;padding:16px}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #40516d}.good{color:#6ee7b7}.bad{color:#fda4af}small{color:#a3b4ce}details{margin:14px 0}</style>
+<h1>VARIANT_NAME receiver</h1><p>Same LDACS frame parameters; a separate receiver partition on EDGE Z7-10.</p>
+<p><small>Boot this variant before using the console. Every result requires a board response with the matching architecture ID. UART timing is separate from decoder timing.</small></p>
+<label>Mode <select id="mode"></select></label><textarea id="message">LDACS PARTITION RESEARCH</textarea>
+<label>Measured repetitions <input id="iterations" type="number" min="1" max="1000" value="20"></label><br>
+<button onclick="run('trace')">Trace all five stages</button><button onclick="run('benchmark')">Measure one-pass decoding</button><button id="download" disabled onclick="downloadResult()">Download result JSON</button>
+<p id="status">No board result collected.</p><div id="summary"></div><div id="stages"></div>
+<script>
+const modes=['qpsk_1_2','qpsk_2_3','qpsk_3_4','16qam_1_2','16qam_2_3','64qam_1_2','64qam_2_3','64qam_3_4'];
+for(const mode of modes){const o=document.createElement('option');o.value=mode;o.textContent=mode;document.getElementById('mode').append(o)}
+let lastResult=null;
+async function run(command){
+ const status=document.getElementById('status');status.textContent='Waiting for physical board response…';status.className='';
+ document.querySelectorAll('button').forEach(b=>b.disabled=true);document.getElementById('summary').textContent='';document.getElementById('stages').textContent='';
+ try{
+  const response=await fetch('/api/'+command,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:document.getElementById('mode').value,message:document.getElementById('message').value,iterations:Number(document.getElementById('iterations').value)})});
+  const data=await response.json();if(!data.ok)throw Error(data.error);lastResult=data.result;
+  const ok=command==='trace'?lastResult.payload_matches_input&&lastResult.rs_failures===0&&Object.values(lastResult.stages).every(s=>s.matches_model):lastResult.valid;
+  status.textContent=ok?'Board result verified':'Board returned a decoding mismatch';status.className=ok?'good':'bad';
+  const pre=document.createElement('pre');
+  if(command==='trace'){
+   pre.textContent=`Recovered: ${lastResult.recovered_text}\nUART trace wall time: ${lastResult.uart_trace_wall_ms.toFixed(3)} ms`;
+   for(const [name,stage] of Object.entries(lastResult.stages)){
+    const d=document.createElement('details'),s=document.createElement('summary'),p=document.createElement('pre');s.textContent=`${name}: ${stage.matches_model?'MATCH':'MISMATCH'} — ${stage.length} bytes`;p.textContent=stage.output_hex;d.append(s,p);document.getElementById('stages').append(d)
+   }
+  }else{const s=lastResult.results[0].samples[0];pre.textContent=JSON.stringify({decoder_mean_us:s.decoder_mean_us,decoder_min_us:s.decoder_min_us,decoder_max_us:s.decoder_max_us,payload_mbps:s.decoder_payload_mbps,uart_batch_wall_ms:s.uart_batch_wall_ms,stages:s.stage_measurements},null,2)}
+  document.getElementById('summary').append(pre);
+ }catch(e){lastResult=null;status.textContent=e.message;status.className='bad'}
+ finally{document.querySelectorAll('button').forEach(b=>b.disabled=false);document.getElementById('download').disabled=!lastResult}
+}
+function downloadResult(){const url=URL.createObjectURL(new Blob([JSON.stringify(lastResult,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='VARIANT_NAME-result.json';a.click();URL.revokeObjectURL(url)}
+</script></html>
