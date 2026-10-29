@@ -1,0 +1,10 @@
+build/
+__pycache__/
+*.pyc
+*.jou
+*.log
+.Xil/
+sw/*.elf
+sw/*.map
+sw/firmware_build.json
+results/

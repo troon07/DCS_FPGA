@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-29",
+  "board_measurements_performed": false,
+  "physical_partial_reconfiguration_verified": false,
+  "vivado_executed": false,
+  "pre_existing_source_files_preserved": 159,
+  "rtl_vectors": {
+    "HYBRID": {
+      "passed_cases": 13,
+      "evidence": "successful simulator logs in ignored build/sim_* directories",
+      "cases": [
+        "sim_16qam_1_2_0.0_tap0",
+        "sim_16qam_2_3_0.0_tap0",
+        "sim_64qam_1_2_0.0_tap0",
+        "sim_64qam_2_3_0.0_tap0",
+        "sim_64qam_3_4_0.0_tap0",
+        "sim_qpsk_1_2_0.01_tap1",
+        "sim_qpsk_1_2_0.01_tap2",
+        "sim_qpsk_1_2_0.02_tap0",
+        "sim_qpsk_1_2_0.0_tap0",
+        "sim_qpsk_2_3_0.0_tap0",
+        "sim_qpsk_3_4_0.01_tap0",
+        "sim_qpsk_3_4_0.04_tap0",
+        "sim_qpsk_3_4_0.0_tap0"
+      ],
+      "final_csr_change_quick_regression_passed": true
+    },
+    "FULL_PL": {
+      "passed_cases": 15,
+      "evidence": "successful simulator logs in ignored build/sim_* directories",
+      "cases": [
+        "sim_16qam_1_2_0.0_tap0",
+        "sim_16qam_2_3_0.0_tap0",
+        "sim_64qam_1_2_0.0_tap0",
+        "sim_64qam_2_3_0.0_tap0",
+        "sim_64qam_3_4_0.0_tap0",
+        "sim_qpsk_1_2_0.01_tap1",
+        "sim_qpsk_1_2_0.01_tap2",
+        "sim_qpsk_1_2_0.01_tap3",
+        "sim_qpsk_1_2_0.01_tap4",
+        "sim_qpsk_1_2_0.02_tap0",
+        "sim_qpsk_1_2_0.0_tap0",
+        "sim_qpsk_2_3_0.0_tap0",
+        "sim_qpsk_3_4_0.01_tap0",
+        "sim_qpsk_3_4_0.04_tap0",
+        "sim_qpsk_3_4_0.0_tap0"
+      ],
+      "final_csr_change_quick_regression_passed": true
+    }
+  },
+  "arm_images": {
+    "HYBRID": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "f3c9b861f1d1fe276cc2e314f8844e3b0cc7d0a050d86f984b5ed608b16bd988"
+    },
+    "FULL_PL": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "9081869307c034d34608af8403a144933c8d3ea4762cda43bef50946effb60c3"
+    },
+    "FULL_PS": {
+      "compiler": "arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 15.2.1 20251203",
+      "elf_sha256": "016dcdbade8c24a971bb35114ae881f357e1c6f47e08a3cc123a060a65bea688"
+    }
+  },
+  "ps_c_frame_cases": 24,
+  "direct_rs_cases": 9,
+  "host_protocol_tests_per_project": 9,
+  "pcap_register_fixture_tests": 8,
+  "six_way_comparison_tests": 4,
+  "rm_interfaces_checked": 4,
+  "pending": [
+    "Vivado command execution",
+    "XC7Z010 DFX floorplan legality/fit/routing/timing",
+    "pr_verify and image packaging from an actual implementation",
+    "Real PCAP partial loads and restart correctness",
+    "Physical-board six-configuration benchmarks"
+  ]
+}
