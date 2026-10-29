@@ -3,118 +3,80 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LDACS Hardware Console</title>
+  <title>LDACS Real Stage Comparison</title>
   <link rel="stylesheet" href="../shared/styles.css">
 </head>
 <body>
 <header class="app-header">
   <div class="brand">
-    <h1>LDACS hardware console</h1>
-    <p>EDGE Z7-10 · XC7Z010 · measured board data only</p>
+    <h1>LDACS stage comparison</h1>
+    <p>Software encoder · software decoder · EDGE Z7-10 board decoder</p>
   </div>
-  <nav class="nav"><a class="active" href="/tx/index.html">Transmit</a><a href="/rx/index.html">Latest result</a></nav>
   <div id="boardStatus" class="status">Checking COM5</div>
+  <button id="bootButton" class="secondary" onclick="bootBoard()">Boot firmware</button>
 </header>
 
-<main class="container stack">
-  <section class="grid">
-    <div class="card">
-      <h2>Send a frame</h2>
-      <p class="intro">The frame is encoded on the PC, sent through COM5, processed by the Zynq PS/PL pipeline, and returned through COM5.</p>
-      <div class="field">
-        <label for="message">Message</label>
-        <textarea id="message">HARDWARE LOOPBACK TEST</textarea>
-      </div>
-      <div class="field">
-        <label for="mode">Frame mode</label>
-        <select id="mode">
-          <option value="qpsk_1_2">QPSK 1/2 · 9,768 coded bits</option>
-          <option value="qpsk_2_3">QPSK 2/3 · 9,768 coded bits</option>
-          <option value="qpsk_3_4">QPSK 3/4 · 9,768 coded bits</option>
-          <option value="16qam_1_2">16QAM 1/2 · 19,536 coded bits</option>
-          <option value="16qam_2_3">16QAM 2/3 · 19,536 coded bits</option>
-          <option value="64qam_1_2">64QAM 1/2 · 29,304 coded bits</option>
-          <option value="64qam_2_3">64QAM 2/3 · 29,304 coded bits</option>
-          <option value="64qam_3_4">64QAM 3/4 · 29,304 coded bits</option>
-        </select>
-      </div>
-      <div class="actions">
-        <button id="sendButton" class="primary" onclick="sendFrame()">Send through hardware</button>
-        <button id="bootButton" class="secondary" onclick="bootBoard()">Program and boot board</button>
-      </div>
-      <div id="notice" class="notice"></div>
-      <p class="footnote">No artificial SNR, random constellation, injected errors, or substituted output is used by this page.</p>
+<main class="trace-container">
+  <section class="control-card">
+    <div class="field input-field">
+      <label for="message">Input message</label>
+      <textarea id="message">REAL HARDWARE STAGE TRACE</textarea>
     </div>
-
-    <div class="card">
-      <h2>Hardware evidence</h2>
-      <p class="intro">Fixed configuration and build values from the currently programmed design.</p>
-      <div class="kv">
-        <div>Device</div><div>XC7Z010CLG400-1</div>
-        <div>Serial link</div><div>COM5 · 115200 8N1</div>
-        <div>Implemented PL clock</div><div>71.429 MHz</div>
-        <div>Decoder in PL</div><div>Viterbi · block deinterleaver · RS</div>
-        <div>Functions in PS</div><div>Helical deinterleaver · derandomizer</div>
-      </div>
+    <div class="field mode-field">
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="qpsk_1_2">QPSK 1/2 · 9,768 coded bits</option>
+        <option value="qpsk_2_3">QPSK 2/3 · 9,768 coded bits</option>
+        <option value="qpsk_3_4">QPSK 3/4 · 9,768 coded bits</option>
+        <option value="16qam_1_2">16QAM 1/2 · 19,536 coded bits</option>
+        <option value="16qam_2_3">16QAM 2/3 · 19,536 coded bits</option>
+        <option value="64qam_1_2">64QAM 1/2 · 29,304 coded bits</option>
+        <option value="64qam_2_3">64QAM 2/3 · 29,304 coded bits</option>
+        <option value="64qam_3_4">64QAM 3/4 · 29,304 coded bits</option>
+      </select>
     </div>
+    <button id="sendButton" class="primary transmit-button" onclick="sendFrame()">Transmit and compare</button>
   </section>
 
-  <section id="result" class="stack hidden">
-    <div class="card">
-      <h2>Returned data</h2>
-      <p class="intro">The right-hand value is displayed only after a valid response header and payload arrive from the board.</p>
-      <div class="message-pair">
-        <div class="message-box"><strong>Sent</strong><pre id="sentText"></pre></div>
-        <div id="receivedBox" class="message-box"><strong>Received from hardware</strong><pre id="receivedText"></pre></div>
-      </div>
-    </div>
+  <div id="notice" class="notice"></div>
 
-    <div class="metrics">
-      <div class="metric"><div id="roundTrip" class="value">—</div><div class="label">Measured COM5 round trip</div></div>
-      <div class="metric"><div id="throughput" class="value">—</div><div class="label">Measured effective payload rate</div></div>
-      <div class="metric"><div id="codedBits" class="value">—</div><div class="label">Coded bits sent</div></div>
-      <div class="metric"><div id="payloadBytes" class="value">—</div><div class="label">Returned frame bytes</div></div>
-    </div>
-
-    <div class="card">
-      <h2>Observed transaction path</h2>
-      <p class="intro">This diagram identifies the components traversed; only the complete UART-to-UART interval is timed.</p>
-      <div class="flow">
-        <div class="node"><strong>PC encoder</strong><span>Software</span></div>
-        <div class="node transport"><strong>COM5 TX</strong><span>UART bytes</span></div>
-        <div class="node hardware"><strong>Zynq PS</strong><span>Helical + DMA</span></div>
-        <div class="node hardware"><strong>FPGA PL</strong><span>Viterbi + BDI + RS</span></div>
-        <div class="node hardware"><strong>Zynq PS</strong><span>Derandomizer</span></div>
-        <div class="node transport"><strong>COM5 RX</strong><span>Returned payload</span></div>
+  <section id="result" class="hidden">
+    <section class="received-card">
+      <div>
+        <span class="received-label">Received from board</span>
+        <pre id="receivedMessage"></pre>
       </div>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <h2>Validation checks</h2>
-        <p class="intro">Hardware output is checked both against the input and against a complete software decode of the exact transmitted frame.</p>
-        <div class="check-grid">
-          <div class="check"><div class="name">Hardware vs input</div><div id="inputCheck" class="result">—</div></div>
-          <div class="check"><div class="name">Hardware vs full software model</div><div id="softwareCheck" class="result">—</div></div>
-          <div class="check"><div class="name">RS status from hardware</div><div id="rsCheck" class="result">—</div></div>
-        </div>
-        <div class="kv">
-          <div>Hardware byte mismatches</div><div id="hwMismatch">—</div>
-          <div>Hardware RS corrections</div><div id="rsCorrections">—</div>
-          <div>Hardware RS failures</div><div id="rsFailures">—</div>
-          <div>Measured host software decode</div><div id="softwareTime">—</div>
-        </div>
-        <p class="footnote">The software model and hardware use the same SPEC-CHECK constants. A match verifies implementation consistency, not specification conformance.</p>
+      <span id="messageMatch" class="comparison">Waiting</span>
+    </section>
+    <details class="performance-panel" open>
+      <summary>Measured performance analysis</summary>
+      <div class="performance-controls">
+        <label for="performanceView">Display</label>
+        <select id="performanceView" onchange="renderPerformanceView()">
+          <option value="board">Board decoder runtime</option>
+          <option value="encoder">Software encoder runtime</option>
+          <option value="software">Software decoder runtime</option>
+          <option value="resources">FPGA resource utilization</option>
+          <option value="static">FPGA static timing</option>
+        </select>
       </div>
-
-      <div class="card">
-        <h2>Implemented FPGA resources</h2>
-        <p class="intro">Real values parsed from the routed XC7Z010 Vivado report.</p>
-        <div class="resource"><div class="resource-head"><span>Slice LUTs</span><span>11,031 / 17,600 · 62.68%</span></div><div class="bar"><span style="width:62.68%"></span></div></div>
-        <div class="resource"><div class="resource-head"><span>Slice registers</span><span>5,788 / 35,200 · 16.44%</span></div><div class="bar"><span style="width:16.44%"></span></div></div>
-        <div class="resource"><div class="resource-head"><span>Block RAM tiles</span><span>50.5 / 60 · 84.17%</span></div><div class="bar"><span style="width:84.17%"></span></div></div>
-        <div class="resource"><div class="resource-head"><span>DSPs</span><span>1 / 80 · 1.25%</span></div><div class="bar"><span style="width:1.25%"></span></div></div>
-      </div>
+      <div id="performanceSummary" class="performance-summary"></div>
+      <div id="performanceContent"></div>
+      <p class="performance-note">Only measurements from this transaction and the current routed Vivado build are displayed. Missing reports are shown as unavailable.</p>
+    </details>
+    <div class="trace-columns">
+      <section class="trace-column encoder-column">
+        <header><span>01</span><div><h2>Software encoder</h2><p>Exact host-generated transmit stages</p></div></header>
+        <div id="encoderStages" class="stage-list"></div>
+      </section>
+      <section class="trace-column software-column">
+        <header><span>02</span><div><h2>Software decoder</h2><p>Full decode of the transmitted frame</p></div></header>
+        <div id="softwareStages" class="stage-list"></div>
+      </section>
+      <section class="trace-column board-column">
+        <header><span>03</span><div><h2>Board decoder</h2><p>Buffers returned by PS/PL over COM5</p></div></header>
+        <div id="boardStages" class="stage-list"></div>
+      </section>
     </div>
   </section>
 </main>
@@ -122,27 +84,46 @@
 <script src="../shared/app.js"></script>
 <script>
 const API = location.origin;
-function showNotice(text, kind = 'info') { const box = document.getElementById('notice'); box.textContent = text; box.className = `notice show ${kind}`; }
+let latestPerformance = null;
+
+function showNotice(text, kind = 'info') {
+  const box = document.getElementById('notice');
+  box.textContent = text;
+  box.className = `notice show ${kind}`;
+}
 
 async function pollStatus() {
   const pill = document.getElementById('boardStatus');
   try {
     const response = await fetch(`${API}/api/hw/status`, {cache: 'no-store'});
     const data = await response.json();
-    if (data.com_open) { pill.className = 'status live'; pill.textContent = `COM5 open · ${data.baud} baud`; }
-    else { pill.className = 'status error'; pill.textContent = 'COM5 unavailable'; }
-  } catch (_) { pill.className = 'status error'; pill.textContent = 'Server unavailable'; }
+    if (data.com_open) {
+      pill.className = 'status live';
+      pill.textContent = `${data.port} connected · ${data.baud} baud`;
+    } else {
+      pill.className = 'status error';
+      pill.textContent = 'Board disconnected';
+    }
+  } catch (_) {
+    pill.className = 'status error';
+    pill.textContent = 'Server unavailable';
+  }
 }
 
 async function bootBoard() {
-  const button = document.getElementById('bootButton'); button.disabled = true;
-  showNotice('Programming the FPGA and starting the ARM firmware…');
+  const button = document.getElementById('bootButton');
+  button.disabled = true;
+  showNotice('Programming FPGA and starting trace firmware…');
   try {
     const response = await fetch(`${API}/api/hw/boot`, {method: 'POST', body: '{}'});
     const data = await response.json();
-    showNotice(data.success ? 'Board programmed and firmware started.' : data.message, data.success ? 'ok' : 'bad');
-  } catch (error) { showNotice(`Boot failed: ${error.message}`, 'bad'); }
-  finally { button.disabled = false; pollStatus(); }
+    showNotice(data.success ? 'Firmware booted. Real stage tracing is ready.' : data.message, data.success ? 'ok' : 'bad');
+  } catch (error) {
+    showNotice(`Boot failed: ${error.message}`, 'bad');
+  } finally {
+    button.disabled = false;
+    pollStatus();
+  }
 }
 
 async function sendFrame() {
@@ -150,38 +131,140 @@ async function sendFrame() {
   const payload = document.getElementById('message').value;
   const mode = document.getElementById('mode').value;
   if (!payload.length) return showNotice('Enter a message first.', 'bad');
-  button.disabled = true; showNotice('Waiting for the real COM5 hardware response…');
+  button.disabled = true;
+  document.getElementById('result').classList.add('hidden');
+  showNotice('Running software chains and collecting five real board stage buffers…');
   try {
-    const response = await fetch(`${API}/api/tx/transmit`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({payload, mode}) });
+    const response = await fetch(`${API}/api/tx/transmit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({payload, mode})
+    });
     const data = await response.json();
-    if (data.status !== 'success' || !data.hw_active) throw new Error(data.message || 'No valid hardware result');
-    renderResult(data);
-    showNotice(data.is_bit_exact ? 'Hardware response received and verified.' : 'Hardware responded with mismatches.', data.is_bit_exact ? 'ok' : 'bad');
-  } catch (error) { document.getElementById('result').classList.add('hidden'); showNotice(error.message, 'bad'); }
-  finally { button.disabled = false; pollStatus(); }
+    if (data.status !== 'success' || !data.hw_active || !data.trace_columns) {
+      throw new Error(data.message || 'No valid hardware trace was returned');
+    }
+    renderColumns(data);
+    const boardStages = data.trace_columns.board_decoder || [];
+    const allMatch = boardStages.every(stage => stage.comparison && stage.comparison.match);
+    showNotice(allMatch ? 'All five board stages exactly match the software decoder.' : 'Hardware trace received; one or more stage comparisons failed.', allMatch ? 'ok' : 'bad');
+  } catch (error) {
+    showNotice(error.message, 'bad');
+  } finally {
+    button.disabled = false;
+    pollStatus();
+  }
 }
 
-function renderResult(data) {
-  const sw = data.software_crosscheck || {};
+function renderColumns(data) {
+  const columns = data.trace_columns;
+  document.getElementById('receivedMessage').textContent = data.recovered_text || '';
+  const messageMatch = document.getElementById('messageMatch');
+  messageMatch.className = `comparison ${data.is_bit_exact ? 'pass' : 'fail'}`;
+  messageMatch.textContent = data.is_bit_exact ? 'BIT-EXACT' : `${Number(data.byte_mismatches || 0).toLocaleString()} BYTE MISMATCHES`;
+  renderStageList('encoderStages', columns.software_encoder || [], false);
+  renderStageList('softwareStages', columns.software_decoder || [], false);
+  renderStageList('boardStages', columns.board_decoder || [], true);
+  latestPerformance = data.performance_analysis || null;
+  renderPerformanceView();
   document.getElementById('result').classList.remove('hidden');
-  document.getElementById('sentText').textContent = data.input_text || '';
-  document.getElementById('receivedText').textContent = data.recovered_text || '';
-  document.getElementById('receivedBox').classList.toggle('good', Boolean(data.is_bit_exact));
-  document.getElementById('roundTrip').textContent = `${fixed(data.latency_ms, 3)} ms`;
-  document.getElementById('throughput').textContent = `${fixed(data.throughput_mbps, 3)} Mb/s`;
-  document.getElementById('codedBits').textContent = Number(data.coded_bits || 0).toLocaleString();
-  document.getElementById('payloadBytes').textContent = `${Number(data.frame_payload_bytes || 0).toLocaleString()} B`;
-  setCheck('inputCheck', data.is_bit_exact, data.is_bit_exact ? 'PASS · bit exact' : 'FAIL');
-  setCheck('softwareCheck', sw.matches_hardware, sw.matches_hardware ? 'PASS · exact match' : 'FAIL');
-  setCheck('rsCheck', data.rs_fails === 0, data.rs_fails === 0 ? 'PASS · no failures' : 'FAIL');
-  document.getElementById('hwMismatch').textContent = data.byte_mismatches ?? '—';
-  document.getElementById('rsCorrections').textContent = data.rs_corrections ?? '—';
-  document.getElementById('rsFailures').textContent = data.rs_fails ?? '—';
-  document.getElementById('softwareTime').textContent = sw.measured_decode_ms == null ? '—' : `${fixed(sw.measured_decode_ms, 3)} ms`;
   document.getElementById('result').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
-function setCheck(id, pass, text) { const element = document.getElementById(id); element.className = `result ${pass ? 'pass' : 'fail'}`; element.textContent = text; }
-pollStatus(); setInterval(pollStatus, 5000);
+
+function renderPerformanceView() {
+  const target = document.getElementById('performanceContent');
+  const summary = document.getElementById('performanceSummary');
+  if (!target || !latestPerformance) {
+    if (target) target.innerHTML = '<p class="empty">No real performance measurement has been received.</p>';
+    if (summary) summary.innerHTML = '';
+    return;
+  }
+  const p = latestPerformance;
+  const pl = p.complete_pl_pipeline || {};
+  const uart = p.uart_round_trip || {};
+  summary.innerHTML = [
+    performanceMetric('PL clock', `${formatNumber(p.pl_clock_mhz, 6)} MHz`),
+    performanceMetric('Complete FPGA pipeline', `${formatNumber(pl.latency_us, 3)} µs`),
+    performanceMetric('Pipeline cycles', formatInteger(pl.cycles)),
+    performanceMetric('COM5 trace transaction', `${formatNumber(uart.latency_us / 1000, 3)} ms`),
+  ].join('');
+
+  const view = document.getElementById('performanceView').value;
+  if (view === 'resources') return renderResources(target, p.vivado || {});
+  if (view === 'static') return renderStaticTiming(target, p.vivado || {});
+  const rows = view === 'encoder' ? p.software_encoder
+    : view === 'software' ? p.software_decoder : p.board_decoder;
+  renderRuntime(target, rows || []);
+}
+
+function performanceMetric(label, value) {
+  return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function renderRuntime(target, rows) {
+  target.innerHTML = `<div class="performance-table-wrap"><table class="performance-table">
+    <thead><tr><th>Block</th><th>Execution domain</th><th>Measured latency</th><th>Measured cycles</th><th>Processed</th><th>Throughput</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.domain)}</td>
+      <td>${formatNumber(row.latency_us, 3)} µs</td><td>${formatInteger(row.cycles)}</td>
+      <td>${formatInteger(row.work_size)} ${escapeHtml(row.work_unit)}</td>
+      <td>${formatNumber(row.throughput_mbps, 6)} Mb/s</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderResources(target, vivado) {
+  const rows = [...(vivado.blocks || [])];
+  if (vivado.total) rows.push({name: 'Complete implemented design', utilization: vivado.total, available: true});
+  target.innerHTML = `<div class="performance-table-wrap"><table class="performance-table">
+    <thead><tr><th>Routed hierarchy</th><th>Slice LUTs</th><th>Flip-flops</th><th>BRAM tiles</th><th>DSP48</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const u = row.utilization;
+      return `<tr><td>${escapeHtml(row.name)}</td>${u
+        ? `<td>${formatInteger(u.lut)}</td><td>${formatInteger(u.ff)}</td><td>${formatNumber(u.bram, 1)}</td><td>${formatInteger(u.dsp)}</td>`
+        : '<td colspan="4" class="unavailable">Unavailable until the routed block report is generated</td>'}</tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function renderStaticTiming(target, vivado) {
+  const rows = vivado.blocks || [];
+  target.innerHTML = `<div class="performance-table-wrap"><table class="performance-table">
+    <thead><tr><th>Routed hierarchy</th><th>Worst internal setup slack</th><th>Clock</th><th>Result</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const timing = row.static_timing;
+      const slack = timing && timing.worst_setup_slack_ns;
+      return `<tr><td>${escapeHtml(row.name)}</td>${timing
+        ? `<td>${formatNumber(slack, 3)} ns</td><td>${formatNumber(latestPerformance.pl_clock_mhz, 6)} MHz</td><td class="${slack >= 0 ? 'pass' : 'fail'}">${slack >= 0 ? 'MET' : 'VIOLATED'}</td>`
+        : '<td colspan="3" class="unavailable">Unavailable until the routed block timing report is generated</td>'}</tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function formatNumber(value, digits) {
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString(undefined, {minimumFractionDigits: digits, maximumFractionDigits: digits}) : 'Unavailable';
+}
+
+function formatInteger(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—';
+}
+
+function renderStageList(targetId, stages, showComparison) {
+  const target = document.getElementById(targetId);
+  target.innerHTML = stages.map((stage, index) => stageCard(stage, index, showComparison)).join('');
+}
+
+function stageCard(stage, index, showComparison) {
+  const comparison = stage.comparison || {};
+  const badge = showComparison
+    ? `<span class="comparison ${comparison.match ? 'pass' : 'fail'}">${comparison.match ? 'MATCH' : 'MISMATCH'} · ${Number(comparison.mismatch_count || 0).toLocaleString()}</span>`
+    : `<span class="stage-number">Stage ${index + 1}</span>`;
+  return `<article class="stage-card ${showComparison && comparison.match ? 'matched' : ''}">
+    <div class="stage-title"><h3>${escapeHtml(stage.name)}</h3>${badge}</div>
+    <p class="stage-source">${escapeHtml(stage.source)}</p>
+    <div class="stage-meta"><span>${Number(stage.length || 0).toLocaleString()} ${escapeHtml(stage.unit)}</span><span>SHA-256 ${escapeHtml(stage.sha256)}</span></div>
+    <pre class="stage-preview">${escapeHtml(stage.preview)}</pre>
+    <details><summary>Show complete real output</summary><pre class="stage-full">${escapeHtml(stage.full_output)}</pre></details>
+  </article>`;
+}
+
+pollStatus();
+setInterval(pollStatus, 5000);
 </script>
 </body>
 </html>

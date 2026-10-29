@@ -29,17 +29,17 @@ the correctness of those constants against the LDACS specification.
 ## Build result
 
 - Cortex-A9 firmware: `sw/uart_bridge.elf` built successfully.
-- Firmware ELF size: 69,388 bytes.
+- Firmware ELF size: 70,388 bytes.
 - XC7Z010 synthesis, implementation, bitstream generation, and XSA export completed successfully.
 - Vivado PS configuration request: 70 MHz; implemented clock from the timing
   report: 71.429 MHz (14.000 ns period).
-- Timing: WNS `0.330 ns`, TNS `0.000 ns`, zero setup/hold failing endpoints.
+- Timing: WNS `0.233 ns`, TNS `0.000 ns`, zero setup/hold failing endpoints.
 - Filtered Vivado `ERROR`/`CRITICAL WARNING` output: none.
 
 Parsed timing report line:
 
 ```text
-0.330        0.000                      0                20770        0.024        0.000                      0                20770        5.750        0.000                       0                  6375
+0.233        0.000                      0                21326        0.050        0.000                      0                21326        5.750        0.000                       0                  6577
 ```
 
 Parsed clock report line:
@@ -51,16 +51,16 @@ clk_fpga_0  {0.000 7.000}      14.000          71.429
 Parsed utilization report lines:
 
 ```text
-| Slice LUTs      | 11031 | 0 | 0 | 17600 | 62.68 |
-| Slice Registers |  5788 | 0 | 0 | 35200 | 16.44 |
+| Slice LUTs      | 11270 | 0 | 0 | 17600 | 64.03 |
+| Slice Registers |  5990 | 0 | 0 | 35200 | 17.02 |
 | Block RAM Tile  |  50.5 | 0 | 0 |    60 | 84.17 |
 | DSPs            |    1 | 0 | 0 |    80 |  1.25 |
 ```
 
 | Resource | Used | Available | Utilization |
 | --- | ---: | ---: | ---: |
-| Slice LUTs | 11,031 | 17,600 | 62.68% |
-| Slice registers | 5,788 | 35,200 | 16.44% |
+| Slice LUTs | 11,270 | 17,600 | 64.03% |
+| Slice registers | 5,990 | 35,200 | 17.02% |
 | Block RAM tiles | 50.5 | 60 | 84.17% |
 | DSPs | 1 | 80 | 1.25% |
 
@@ -80,9 +80,44 @@ Parsed utilization report lines:
 6. Hardware-returned output: `HARDWARE INTEGRATION VALIDATION COM5`.
 7. The transaction used QPSK 1/2, 9,768 coded bits, 4,884 trellis steps,
    six RS codewords, RS N=101, RS K=91, and a 546-byte frame payload.
-8. Measured result: bit-exact match, 0 bit mismatches, 0 byte
-   mismatches, 0 RS corrections, 0 RS failures, 966,349.7 us / 966.350 ms
-   UART-to-UART wall time, and 0.005 Mb/s measured payload throughput.
+8. The trace firmware returns the real helical-deinterleaver, Viterbi,
+   block-deinterleaver, RS-decoder, and final derandomizer buffers. A QPSK 1/2
+   transaction matched the full software decoder at all five stages with zero
+    mismatches, zero RS corrections, and zero RS failures.
+
+## Real per-block performance instrumentation
+
+TRC3 measures the first accepted input through the final accepted output of
+each block with the board's free-running 71,428,497 Hz PL clock. A real QPSK
+1/2 COM5 validation transaction produced:
+
+| Board block | Domain | Cycles | Latency |
+| --- | --- | ---: | ---: |
+| Helical deinterleaver | Zynq ARM PS | 484,858 | 6,788.019 us |
+| Viterbi decoder | XC7Z010 FPGA PL | 34,117 | 477.638 us |
+| Block deinterleaver | XC7Z010 FPGA PL | 11,348 | 158.872 us |
+| Reed-Solomon decoder | XC7Z010 FPGA PL | 1,758 | 24.612 us |
+| PRBS derandomizer | Zynq ARM PS | 22,684 | 317.576 us |
+| Complete FPGA pipeline | XC7Z010 FPGA PL | 35,876 | 502.265 us |
+
+The complete FPGA counter measures the streaming pipeline as a whole, so its
+latency is not the sum of independently overlapping stage latencies. The COM5
+trace wall clock remains separate because it includes UART transport and three
+hardware passes.
+
+Current routed per-hierarchy Vivado results:
+
+| Hierarchy | LUT | FF | BRAM | DSP | Worst setup slack |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Viterbi decoder | 5,155 | 1,078 | 44 | 0 | +1.430 ns |
+| Block deinterleaver | 118 | 74 | 1 | 0 | +6.277 ns |
+| Reed-Solomon decoder | 2,783 | 653 | 0.5 | 0 | +0.233 ns |
+| Complete decoder IP | 8,428 | 2,198 | 45.5 | 1 | +0.233 ns |
+
+The frontend performance dropdown displays these routed reports together with
+the latest real host, PS, and PL runtime measurements. It displays unavailable
+when a report or hardware measurement does not exist; it does not substitute
+paper values.
 
 ## Parameter cross-check boundary
 
@@ -132,10 +167,11 @@ Parsed utilization report lines:
   software byte agreement separately from the hardware measurement.
 - All eight zero-error software encode/decode modes passed with zero payload
   mismatches and zero RS failures.
-- A final post-change COM5 transaction returned `FINAL UI HARDWARE CHECK`
-  exactly: 0 hardware byte mismatches, 0 hardware bit mismatches, 0 RS
-  corrections, 0 RS failures, 945.957 ms measured COM5 round trip, and an
-  exact match to the complete software decode.
+- A real eight-mode COM5 trace sweep passed every mode. Each transaction had
+  zero final payload mismatches, zero RS failures, and zero mismatches at all
+  five board-versus-software decoder stages. Observed traced round-trip times
+  ranged from approximately 1.93 s to 6.04 s because the full intermediate
+  buffers are returned over 115200-baud UART.
 - The software comparison shares the same `SPEC-CHECK` constants and therefore
   confirms implementation consistency only.
 - **hardware integration validated, spec conformance NOT validated.**

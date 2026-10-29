@@ -35,6 +35,8 @@ import time
 import subprocess
 import struct
 import threading
+import hashlib
+import re
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
@@ -102,6 +104,7 @@ PAPER_UTILIZATION = {
 # ── Protocol constants ──
 MAGIC_TX = b'\x4C\x44\x41\x43'   # "LDAC"
 MAGIC_RX = b'\x41\x43\x4C\x44'   # "ACLD"
+MAGIC_RX_TRACE = b'TRC3'            # real board stage traces + measured cycles
 MAGIC_ERR = b'\xFF\xFF\xFF\xFF'
 
 def format_hex_preview(data, max_bytes=64):
@@ -111,6 +114,116 @@ def format_hex_preview(data, max_bytes=64):
         data = data.encode('utf-8')
     h = data[:max_bytes].hex().upper()
     return " ".join(h[i:i+2] for i in range(0, len(h), 2)) + (" ..." if len(data) > max_bytes else "")
+
+
+def format_stage_output(data, representation="hex"):
+    """Serialize a real stage buffer with full output, preview, and digest."""
+    raw = bytes(data)
+    if representation == "bits":
+        full = "".join("1" if value else "0" for value in raw)
+        preview = full[:256] + (" ..." if len(full) > 256 else "")
+        unit = "bits"
+    else:
+        full = raw.hex(" ").upper()
+        preview = " ".join(f"{value:02X}" for value in raw[:64])
+        if len(raw) > 64:
+            preview += " ..."
+        unit = "bytes"
+    return {
+        "length": len(raw),
+        "unit": unit,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "preview": preview,
+        "full_output": full,
+    }
+
+
+def make_trace_stage(name, data, representation, source, comparison=None):
+    stage = format_stage_output(data, representation)
+    stage.update({"name": name, "source": source})
+    if comparison is not None:
+        stage["comparison"] = comparison
+    return stage
+
+
+def compare_stage_buffers(reference, observed):
+    reference = bytes(reference)
+    observed = bytes(observed)
+    mismatch_count = sum(a != b for a, b in zip(reference, observed)) + abs(len(reference) - len(observed))
+    return {
+        "match": mismatch_count == 0,
+        "mismatch_count": mismatch_count,
+        "reference_length": len(reference),
+        "observed_length": len(observed),
+    }
+
+
+def _parse_resource_report(path):
+    """Read routed Vivado resource counts; return None when no real report exists."""
+    if not os.path.isfile(path):
+        return None
+    text = open(path, "r", encoding="utf-8", errors="replace").read()
+    patterns = {
+        "lut": r"\|\s*Slice LUTs\s*\|\s*([0-9.]+)",
+        "ff": r"\|\s*Slice Registers\s*\|\s*([0-9.]+)",
+        "bram": r"\|\s*Block RAM Tile\s*\|\s*([0-9.]+)",
+        "dsp": r"\|\s*DSPs\s*\|\s*([0-9.]+)",
+    }
+    result = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text)
+        result[key] = float(match.group(1)) if match else None
+        if result[key] is not None and result[key].is_integer():
+            result[key] = int(result[key])
+    return result if any(value is not None for value in result.values()) else None
+
+
+def _parse_timing_report(path):
+    """Read the first (worst setup) routed path slack from a Vivado report."""
+    if not os.path.isfile(path):
+        return None
+    text = open(path, "r", encoding="utf-8", errors="replace").read()
+    match = re.search(r"Slack \((?:MET|VIOLATED)\)\s*:\s*([-+0-9.]+)ns", text)
+    return {"worst_setup_slack_ns": float(match.group(1))} if match else None
+
+
+def load_vivado_build_metrics(base_dir=BASE_DIR):
+    """Load only metrics emitted by the current routed Vivado build."""
+    report_dir = os.path.join(base_dir, "hw", "vivado", "build")
+    blocks = []
+    for key, label in (
+        ("viterbi", "Viterbi decoder"),
+        ("block_deint", "Block deinterleaver"),
+        ("rs_decoder", "Reed-Solomon decoder"),
+        ("decoder", "Complete decoder IP"),
+    ):
+        utilization = _parse_resource_report(os.path.join(report_dir, f"utilization_{key}.rpt"))
+        timing = _parse_timing_report(os.path.join(report_dir, f"timing_{key}.rpt"))
+        blocks.append({
+            "name": label,
+            "utilization": utilization,
+            "static_timing": timing,
+            "available": utilization is not None or timing is not None,
+        })
+    return {
+        "source": "Current Vivado routed-design reports",
+        "total": _parse_resource_report(os.path.join(report_dir, "utilization.rpt")),
+        "blocks": blocks,
+    }
+
+
+def measured_stage(name, domain, elapsed_us, work_size, work_unit, cycles=None):
+    work_bits = work_size if work_unit == "bits" else work_size * 8
+    return {
+        "name": name,
+        "domain": domain,
+        "latency_us": round(elapsed_us, 3),
+        "cycles": cycles,
+        "work_size": work_size,
+        "work_unit": work_unit,
+        "throughput_mbps": round(work_bits / max(elapsed_us, 0.001), 6),
+        "source": "Measured during this transaction",
+    }
 
 
 class LDACSEngine:
@@ -130,40 +243,42 @@ class LDACSEngine:
         payload_target_len = lay["payload_bytes"]
 
         # ── Payload framing ──────────────────────────────────────────────
+        t0 = time.perf_counter_ns()
         raw_bytes = input_text.encode('utf-8')
         orig_text_len = len(raw_bytes)
         if len(raw_bytes) < payload_target_len:
             padded_payload = raw_bytes + b'\x00' * (payload_target_len - len(raw_bytes))
         else:
             padded_payload = raw_bytes[:payload_target_len]
+        t_payload = (time.perf_counter_ns() - t0) / 1000.0
 
         # ── TX STAGE 1: PRBS Randomizer (x^15 + x^14 + 1, SPEC seed 0x4A80) ──
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         tx1_randomized = randomize(padded_payload)
-        t_tx1 = (time.perf_counter() - t0) * 1e6   # µs
+        t_tx1 = (time.perf_counter_ns() - t0) / 1000.0
 
         # ── TX STAGE 2: Reed-Solomon RS(101,91), t=5, GF(2^8), poly=0x11D ──
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         K = lay["rs_k"]
         cws = [rs_encode(tx1_randomized[i * K:(i + 1) * K]) for i in range(lay["num_cw"])]
         tx2_rs = b"".join(cws)
-        t_tx2 = (time.perf_counter() - t0) * 1e6
+        t_tx2 = (time.perf_counter_ns() - t0) / 1000.0
 
         # ── TX STAGE 3: Block (byte) interleaver — round-robin across RS codewords ──
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         tx3_block = block_interleave(cws)
-        t_tx3 = (time.perf_counter() - t0) * 1e6
+        t_tx3 = (time.perf_counter_ns() - t0) / 1000.0
 
         # ── TX STAGE 4: Convolutional encoder K=7 G1=0o171 G2=0o133 + puncturing ──
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         bits = bytes_to_bits(tx3_block) + [0] * lay["pad_bits"] + [0] * TAIL_BITS
         tx4_conv = conv_encode_punct(bits, lay["rate"])
-        t_tx4 = (time.perf_counter() - t0) * 1e6
+        t_tx4 = (time.perf_counter_ns() - t0) / 1000.0
 
         # ── TX STAGE 5: Helical interleaver (24 rows, helical-scan permutation) ──
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         tx5_helical = helical_interleave(tx4_conv)
-        t_tx5 = (time.perf_counter() - t0) * 1e6
+        t_tx5 = (time.perf_counter_ns() - t0) / 1000.0
 
         # Hardware-integration validation sends the encoded frame unchanged.
         # Artificial SNR/error injection is deliberately excluded from the
@@ -190,22 +305,61 @@ class LDACSEngine:
             self.hw_connected = False
             return result
         hw_out      = hw_res["data"]
+        hw_helical  = hw_res["helical_deinterleaved"]
+        hw_viterbi  = hw_res["viterbi_bytes"]
+        hw_block    = hw_res["block_deinterleaved"]
+        hw_rs       = hw_res["rs_decoded"]
         rs_corr     = hw_res.get("rs_corr", 0)
         rs_fail     = hw_res.get("rs_fail", 0)
+        hw_cycles   = hw_res["timing_cycles"]
+        pl_clock_hz = hw_res["pl_clock_hz"]
+        cycle_us    = 1e6 / pl_clock_hz
         self.hw_connected = hw_success
 
         # uart_bridge returns the final PS-derandomized payload.
         rx5_derand = hw_out
-        t_rx1_us = None
-        t_rx5_us = None
+        t_rx1_us = hw_cycles["helical_ps"] * cycle_us
+        t_rx5_us = hw_cycles["derandomizer_ps"] * cycle_us
 
         # Run the complete software receive chain on the exact encoded frame
         # sent to COM5. This is an implementation-consistency comparison only:
         # hardware and software intentionally use the same SPEC-CHECK values.
-        t_sw_start = time.perf_counter()
-        sw_dec = decode_frame(rx_channel_bits, lay)
-        t_sw_decode_us = (time.perf_counter() - t_sw_start) * 1e6
-        sw_payload = sw_dec["payload"]
+        t_sw_start = time.perf_counter_ns()
+        t0 = time.perf_counter_ns()
+        sw_vit_in = helical_deinterleave(rx_channel_bits)
+        t_sw_helical = (time.perf_counter_ns() - t0) / 1000.0
+
+        t0 = time.perf_counter_ns()
+        sw_bits = viterbi_decode(sw_vit_in, lay["n_steps"], lay["rate"])
+        sw_data = bits_to_bytes(sw_bits[:lay["num_cw"] * lay["rs_n"] * 8])
+        t_sw_viterbi = (time.perf_counter_ns() - t0) / 1000.0
+
+        t0 = time.perf_counter_ns()
+        sw_deinterleaved = b"".join(block_deinterleave(sw_data, lay["num_cw"]))
+        t_sw_block = (time.perf_counter_ns() - t0) / 1000.0
+
+        t0 = time.perf_counter_ns()
+        sw_hw_out, sw_corr, sw_fail = bytearray(), 0, 0
+        for offset in range(0, len(sw_deinterleaved), lay["rs_n"]):
+            decoded, corrected, ok = rs_decode(sw_deinterleaved[offset:offset + lay["rs_n"]])
+            sw_hw_out += decoded
+            sw_corr += corrected
+            sw_fail += 0 if ok else 1
+        t_sw_rs = (time.perf_counter_ns() - t0) / 1000.0
+
+        t0 = time.perf_counter_ns()
+        sw_payload = randomize(bytes(sw_hw_out))
+        t_sw_derand = (time.perf_counter_ns() - t0) / 1000.0
+        t_sw_decode_us = (time.perf_counter_ns() - t_sw_start) / 1000.0
+        sw_dec = {
+            "vit_in": sw_vit_in,
+            "viterbi_bytes": sw_data,
+            "block_deinterleaved": sw_deinterleaved,
+            "hw_out": bytes(sw_hw_out),
+            "payload": sw_payload,
+            "n_corr": sw_corr,
+            "n_fail": sw_fail,
+        }
         hw_sw_byte_mismatches = (
             sum(a != b for a, b in zip(rx5_derand, sw_payload))
             + abs(len(rx5_derand) - len(sw_payload))
@@ -214,6 +368,25 @@ class LDACSEngine:
             sum(a != b for a, b in zip(padded_payload, sw_payload))
             + abs(len(padded_payload) - len(sw_payload))
         )
+
+        software_decoder_buffers = {
+            "helical": bytes(sw_dec["vit_in"]),
+            "viterbi": sw_dec["viterbi_bytes"],
+            "block": sw_dec["block_deinterleaved"],
+            "rs": sw_dec["hw_out"],
+            "final": sw_dec["payload"],
+        }
+        board_decoder_buffers = {
+            "helical": hw_helical,
+            "viterbi": hw_viterbi,
+            "block": hw_block,
+            "rs": hw_rs,
+            "final": rx5_derand,
+        }
+        stage_comparisons = {
+            name: compare_stage_buffers(software_decoder_buffers[name], board_decoder_buffers[name])
+            for name in software_decoder_buffers
+        }
 
         # ── Recovered text ───────────────────────────────────────────────
         recovered_trimmed = rx5_derand[:orig_text_len]
@@ -234,6 +407,30 @@ class LDACSEngine:
         hw_throughput_mbps   = payload_bits / max(t_hw_us, 1.0)
         link_throughput_mbps = payload_bits / max(t_total_us, 1.0)
         latency_ms_display   = round(t_total_us / 1000.0, 3)
+
+        n_rs_bytes = lay["num_cw"] * lay["rs_n"]
+        software_encoder_performance = [
+            measured_stage("Payload framing", "Host software", t_payload, payload_target_len, "bytes"),
+            measured_stage("PRBS randomizer", "Host software", t_tx1, payload_target_len, "bytes"),
+            measured_stage("Reed-Solomon encoder", "Host software", t_tx2, len(tx2_rs), "bytes"),
+            measured_stage("Block interleaver", "Host software", t_tx3, len(tx3_block), "bytes"),
+            measured_stage("Convolutional encoder", "Host software", t_tx4, len(tx4_conv), "bits"),
+            measured_stage("Helical interleaver", "Host software", t_tx5, len(tx5_helical), "bits"),
+        ]
+        software_decoder_performance = [
+            measured_stage("Helical deinterleaver", "Host software reference", t_sw_helical, n_bits, "bits"),
+            measured_stage("Viterbi decoder", "Host software reference", t_sw_viterbi, n_rs_bytes, "bytes"),
+            measured_stage("Block deinterleaver", "Host software reference", t_sw_block, n_rs_bytes, "bytes"),
+            measured_stage("Reed-Solomon decoder", "Host software reference", t_sw_rs, payload_target_len, "bytes"),
+            measured_stage("PRBS derandomizer", "Host software reference", t_sw_derand, payload_target_len, "bytes"),
+        ]
+        board_decoder_performance = [
+            measured_stage("Helical deinterleaver", "Zynq ARM PS", t_rx1_us, n_bits, "bits", hw_cycles["helical_ps"]),
+            measured_stage("Viterbi decoder", "XC7Z010 FPGA PL", hw_cycles["viterbi_pl"] * cycle_us, n_rs_bytes, "bytes", hw_cycles["viterbi_pl"]),
+            measured_stage("Block deinterleaver", "XC7Z010 FPGA PL", hw_cycles["block_pl"] * cycle_us, n_rs_bytes, "bytes", hw_cycles["block_pl"]),
+            measured_stage("Reed-Solomon decoder", "XC7Z010 FPGA PL", hw_cycles["rs_pl"] * cycle_us, payload_target_len, "bytes", hw_cycles["rs_pl"]),
+            measured_stage("PRBS derandomizer", "Zynq ARM PS", t_rx5_us, payload_target_len, "bytes", hw_cycles["derandomizer_ps"]),
+        ]
 
 
         result = {
@@ -266,7 +463,7 @@ class LDACSEngine:
                 "baud": BAUD_RATE,
                 "response_received": True,
                 "path": "PC -> COM5 -> Zynq PS -> AXI DMA -> FPGA PL -> AXI DMA -> Zynq PS -> COM5 -> PC",
-                "measurement_scope": "UART-to-UART wall clock; individual PS/PL stage timing is not instrumented",
+                "measurement_scope": "Per-stage PL-clock counters plus UART-to-UART host wall clock",
             },
             "software_crosscheck": {
                 "executed": True,
@@ -281,17 +478,79 @@ class LDACSEngine:
                 "measured_payload_throughput_mbps": round(payload_bits / max(t_sw_decode_us, 1.0), 6),
                 "limitation": "Uses the same SPEC-CHECK constants as hardware; this validates implementation agreement, not specification conformance",
             },
+            "trace_columns": {
+                "software_encoder": [
+                    make_trace_stage("Payload and framing", padded_payload, "hex", "Host software encoder"),
+                    make_trace_stage("PRBS randomizer", tx1_randomized, "hex", "Host software encoder"),
+                    make_trace_stage("Reed-Solomon encoder", tx2_rs, "hex", "Host software encoder"),
+                    make_trace_stage("Block interleaver", tx3_block, "hex", "Host software encoder"),
+                    make_trace_stage("Convolutional encoder", tx4_conv, "bits", "Host software encoder"),
+                    make_trace_stage("Helical interleaver / transmitted frame", tx5_helical, "bits", "Exact frame sent to COM5"),
+                ],
+                "software_decoder": [
+                    make_trace_stage("Helical deinterleaver", software_decoder_buffers["helical"], "bits", "Full software decoder"),
+                    make_trace_stage("Viterbi decoder", software_decoder_buffers["viterbi"], "hex", "Full software decoder"),
+                    make_trace_stage("Block deinterleaver", software_decoder_buffers["block"], "hex", "Full software decoder"),
+                    make_trace_stage("Reed-Solomon decoder", software_decoder_buffers["rs"], "hex", "Full software decoder"),
+                    make_trace_stage("PRBS derandomizer / recovered payload", software_decoder_buffers["final"], "hex", "Full software decoder"),
+                ],
+                "board_decoder": [
+                    make_trace_stage("Helical deinterleaver", board_decoder_buffers["helical"], "bits", "Zynq ARM PS via COM5", stage_comparisons["helical"]),
+                    make_trace_stage("Viterbi decoder", board_decoder_buffers["viterbi"], "hex", "XC7Z010 FPGA PL trace tap", stage_comparisons["viterbi"]),
+                    make_trace_stage("Block deinterleaver", board_decoder_buffers["block"], "hex", "XC7Z010 FPGA PL trace tap", stage_comparisons["block"]),
+                    make_trace_stage("Reed-Solomon decoder", board_decoder_buffers["rs"], "hex", "XC7Z010 FPGA PL trace tap", stage_comparisons["rs"]),
+                    make_trace_stage("PRBS derandomizer / hardware payload", board_decoder_buffers["final"], "hex", "Zynq ARM PS via COM5", stage_comparisons["final"]),
+                ],
+            },
+
+            "performance_analysis": {
+                "measurement_status": "Real measurements from this transaction and current routed build",
+                "pl_clock_hz": pl_clock_hz,
+                "pl_clock_mhz": round(pl_clock_hz / 1e6, 6),
+                "clock_period_ns": round(1e9 / pl_clock_hz, 6),
+                "software_encoder": software_encoder_performance,
+                "software_decoder": software_decoder_performance,
+                "board_decoder": board_decoder_performance,
+                "complete_pl_pipeline": measured_stage(
+                    "Complete FPGA pipeline", "XC7Z010 FPGA PL",
+                    hw_cycles["pipeline_pl"] * cycle_us,
+                    payload_target_len, "bytes", hw_cycles["pipeline_pl"]),
+                "board_processing": measured_stage(
+                    "Board processing (three trace passes)", "Zynq PS + FPGA PL",
+                    hw_cycles["board_processing"] * cycle_us,
+                    payload_target_len, "bytes", hw_cycles["board_processing"]),
+                "uart_round_trip": {
+                    "name": "Complete COM5 trace transaction",
+                    "domain": "PC + UART + PS + DMA + PL",
+                    "latency_us": round(t_hw_us, 3),
+                    "cycles": None,
+                    "work_size": payload_target_len,
+                    "work_unit": "bytes",
+                    "throughput_mbps": round(payload_bits / max(t_hw_us, 0.001), 6),
+                    "source": "Measured host wall clock during this transaction",
+                },
+                "vivado": load_vivado_build_metrics(self.base_dir),
+                "notes": [
+                    "FPGA and ARM times use the board's free-running PL clock counter.",
+                    "The complete COM5 transaction includes UART transfer of all trace buffers and is not pure decoder latency.",
+                    "Utilization and static timing are build-time measurements from the current routed Vivado reports.",
+                ],
+            },
 
             # ── Timing: measured (µs) ──
             "timing_us": {
+                "payload_framing_us": round(t_payload, 2),
                 "tx1_prbs_us":      round(t_tx1, 2),
                 "tx2_rs_enc_us":    round(t_tx2, 2),
                 "tx3_block_int_us": round(t_tx3, 2),
                 "tx4_conv_enc_us":  round(t_tx4, 2),
                 "tx5_helical_int_us": round(t_tx5, 2),
-                "rx1_helical_deint_us": None,
+                "rx1_helical_deint_us": round(t_rx1_us, 2),
+                "rx2_viterbi_us": round(hw_cycles["viterbi_pl"] * cycle_us, 2),
+                "rx3_block_deint_us": round(hw_cycles["block_pl"] * cycle_us, 2),
+                "rx4_rs_us": round(hw_cycles["rs_pl"] * cycle_us, 2),
                 "rx_hw_total_us":   round(t_hw_us, 2),
-                "rx5_derand_us":    None,
+                "rx5_derand_us":    round(t_rx5_us, 2),
                 "total_decode_us":  round(t_total_us, 2),
             },
 
@@ -357,25 +616,28 @@ class LDACSEngine:
                     "title": "Stage 1 — Helical De-Interleaver [Zynq PS]",
                     "desc": "24-row helical scan inverse; executed by uart_bridge on the Zynq ARM",
                     "coded_bits": len(rx_channel_bits),
-                    "bit_sample": "Not exposed over UART",
-                    "measured_us": None,
+                    "bit_sample": format_hex_preview(hw_helical),
+                    "measured_us": round(t_rx1_us, 3),
+                    "measured_cycles": hw_cycles["helical_ps"],
                     "domain": "ZYNQ PS",
                 },
                 "stage2_viterbi": {
                     "title": "Stage 2 — Viterbi Trellis Decoder [FPGA]",
                     "desc": f"K=7 hardware Viterbi | {lay['n_steps']} trellis steps",
                     "trellis_steps": lay["n_steps"],
-                    "measured_us": None,   # embedded in hw_total
+                    "measured_us": round(hw_cycles["viterbi_pl"] * cycle_us, 3),
+                    "measured_cycles": hw_cycles["viterbi_pl"],
                     "domain": "FPGA HARDWARE",
-                    "status": "LIVE FPGA (aggregate DMA timing only)",
+                    "status": "LIVE FPGA cycle counter",
                 },
                 "stage3_block_deint": {
                     "title": "Stage 3 — Block De-Interleaver [FPGA]",
                     "desc": f"{lay['num_cw']} RS codewords | Symbol-level 2D column-in row-out",
                     "codewords": lay["num_cw"],
-                    "measured_us": None,
+                    "measured_us": round(hw_cycles["block_pl"] * cycle_us, 3),
+                    "measured_cycles": hw_cycles["block_pl"],
                     "domain": "FPGA HARDWARE",
-                    "status": "LIVE FPGA (aggregate DMA timing only)",
+                    "status": "LIVE FPGA cycle counter",
                 },
                 "stage4_rs_dec": {
                     "title": "Stage 4 — Reed-Solomon RS(101,91) Decoder [FPGA]",
@@ -384,16 +646,18 @@ class LDACSEngine:
                     "size_bytes": len(hw_out),
                     "rs_corrections": rs_corr,
                     "rs_fails": rs_fail,
-                    "measured_us": None,
+                    "measured_us": round(hw_cycles["rs_pl"] * cycle_us, 3),
+                    "measured_cycles": hw_cycles["rs_pl"],
                     "domain": "FPGA HARDWARE",
-                    "status": "LIVE FPGA (aggregate DMA timing only)",
+                    "status": "LIVE FPGA cycle counter",
                 },
                 "stage5_derand": {
                     "title": "Stage 5 — PRBS De-Randomizer [Zynq PS]",
                     "desc": "x¹⁵+x¹⁴+1 LFSR XOR inverse; executed by uart_bridge on the Zynq ARM",
                     "hex": format_hex_preview(rx5_derand),
                     "recovered_text": recovered_text,
-                    "measured_us": None,
+                    "measured_us": round(t_rx5_us, 3),
+                    "measured_cycles": hw_cycles["derandomizer_ps"],
                     "domain": "ZYNQ PS",
                 },
             },
@@ -443,11 +707,11 @@ class LDACSEngine:
 
     def _run_fpga_uart(self, mode, lay, rx_bits):
         """
-        Send encoded bits to FPGA over COM5, receive decoded payload.
+        Send encoded bits to FPGA over COM5 and receive all real board stages.
         Protocol (uart_bridge.c):
           TX: MAGIC_TX (4) + mode(1) + n_coded(2LE) + n_out(2LE) +
               n_steps(2LE) + num_cw(2LE) + rs_n(1) + data[n_coded]
-          RX: MAGIC_RX (4) + n_out(2LE) + rs_corr(2LE) + rs_fail(2LE) + data[n_out]
+          RX: "TRC3" + lengths/counters + eight measured u32 values + buffers
         """
         ser = self._get_serial()
         if ser is None:
@@ -488,29 +752,85 @@ class LDACSEngine:
                 self._close_serial()
                 return {"success": False, "error": "Zynq firmware rejected the frame (decoder version or DMA error)."}
 
-            if magic != MAGIC_RX:
+            if magic == MAGIC_RX:
+                self._close_serial()
+                return {"success": False, "error": "Board is running the old final-output-only firmware. Rebuild and boot the trace firmware."}
+
+            if magic == b'TRC2':
+                self._close_serial()
+                return {"success": False, "error": "Board is running trace protocol TRC2 without cycle counters. Program the new bitstream and firmware."}
+
+            if magic != MAGIC_RX_TRACE:
                 self._close_serial()
                 return {"success": False, "error": f"Invalid UART response magic: {magic.hex()}"}
 
-            # Read n_out, rs_corr, rs_fail
-            meta = ser.read(6)
-            if len(meta) < 6:
+            # Five trace lengths plus RS counters.
+            meta = ser.read(14)
+            if len(meta) < 14:
                 self._close_serial()
-                return {"success": False, "error": "UART timeout while reading FPGA result metadata."}
+                return {"success": False, "error": "UART timeout while reading board trace metadata."}
 
-            recv_n_out, rs_corr, rs_fail = struct.unpack("<HHH", meta)
-
-            # Read decoded payload
-            payload = ser.read(recv_n_out)
-            if len(payload) < recv_n_out:
+            helical_len, viterbi_len, block_len, rs_len, final_len, rs_corr, rs_fail = struct.unpack("<HHHHHHH", meta)
+            expected_lengths = (n_coded, num_cw * rs_n, num_cw * rs_n, n_out, n_out)
+            received_lengths = (helical_len, viterbi_len, block_len, rs_len, final_len)
+            if received_lengths != expected_lengths:
                 self._close_serial()
-                return {"success": False, "error": f"UART short read: received {len(payload)}/{recv_n_out} bytes."}
+                return {
+                    "success": False,
+                    "error": f"Board trace length mismatch: received {received_lengths}, expected {expected_lengths}.",
+                }
+
+            timing_meta = ser.read(32)
+            if len(timing_meta) < 32:
+                self._close_serial()
+                return {"success": False, "error": "UART timeout while reading real board timing counters."}
+            (helical_cycles, vit_cycles, block_cycles, rs_cycles,
+             pipeline_cycles, derand_cycles, board_cycles,
+             pl_clock_hz) = struct.unpack("<IIIIIIII", timing_meta)
+            if pl_clock_hz == 0 or not all((helical_cycles, vit_cycles, block_cycles,
+                                            rs_cycles, pipeline_cycles, derand_cycles,
+                                            board_cycles)):
+                self._close_serial()
+                return {"success": False, "error": "Board returned an invalid zero performance counter."}
+
+            total_trace_len = sum(received_lengths)
+            trace = ser.read(total_trace_len)
+            if len(trace) < total_trace_len:
+                self._close_serial()
+                return {"success": False, "error": f"UART trace short read: received {len(trace)}/{total_trace_len} bytes."}
+
+            offset = 0
+            def take(length):
+                nonlocal offset
+                value = bytes(trace[offset:offset + length])
+                offset += length
+                return value
+
+            helical_trace = take(helical_len)
+            viterbi_trace = take(viterbi_len)
+            block_trace = take(block_len)
+            rs_trace = take(rs_len)
+            payload = take(final_len)
 
             return {
                 "success": True,
                 "data": bytes(payload),
+                "helical_deinterleaved": helical_trace,
+                "viterbi_bytes": viterbi_trace,
+                "block_deinterleaved": block_trace,
+                "rs_decoded": rs_trace,
                 "rs_corr": rs_corr,
                 "rs_fail": rs_fail,
+                "pl_clock_hz": pl_clock_hz,
+                "timing_cycles": {
+                    "helical_ps": helical_cycles,
+                    "viterbi_pl": vit_cycles,
+                    "block_pl": block_cycles,
+                    "rs_pl": rs_cycles,
+                    "pipeline_pl": pipeline_cycles,
+                    "derandomizer_ps": derand_cycles,
+                    "board_processing": board_cycles,
+                },
             }
 
         except Exception as e:

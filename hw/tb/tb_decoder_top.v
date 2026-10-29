@@ -55,7 +55,8 @@ module tb_decoder_top;
     reg [7:0] vin [0:N_IN-1];
     reg [7:0] vexp [0:N_OUT-1];
     integer   in_i = 0, out_i = 0, errors = 0, frame = 0;
-    integer   NFRAMES = 2;
+    // Firmware resets/configures the core for one measured frame per DMA run.
+    integer   NFRAMES = 1;
     reg [31:0] rv;
 
     initial begin
@@ -64,7 +65,7 @@ module tb_decoder_top;
         repeat (10) @(posedge aclk);
         aresetn = 1;
         axil_read(8'h24, rv);
-        if (rv != 32'h4C444331) begin $display("FAIL: bad VERSION %h", rv); $finish; end
+        if (rv != 32'h4C444333) begin $display("FAIL: bad VERSION %h", rv); $finish; end
         axil_write(8'h08, CFG_RATE);
         axil_write(8'h0C, CFG_N_STEPS);
         axil_write(8'h10, CFG_NUM_CW);
@@ -106,13 +107,18 @@ module tb_decoder_top;
     end
 
     initial begin : finish_blk
-        reg [31:0] fr, corr, fail;
+        reg [31:0] fr, corr, fail, vit_cycles, bdi_cycles, rs_cycles, pipe_cycles;
         wait (nframes_out == NFRAMES);
         repeat (5) @(posedge aclk);
         axil_read(8'h18, fr); axil_read(8'h1C, corr); axil_read(8'h20, fail);
+        axil_read(8'h2C, vit_cycles); axil_read(8'h30, bdi_cycles);
+        axil_read(8'h34, rs_cycles); axil_read(8'h38, pipe_cycles);
         $display("frames=%0d rs_corrected=%0d (exp %0d) rs_failed=%0d (exp %0d) sim_time=%0t",
                  fr, corr, EXP_CORR*NFRAMES, fail, EXP_FAIL*NFRAMES, $time);
+        $display("measured cycles: viterbi=%0d block=%0d rs=%0d complete_pl=%0d",
+                 vit_cycles, bdi_cycles, rs_cycles, pipe_cycles);
         if (fr != NFRAMES || corr != EXP_CORR*NFRAMES || fail != EXP_FAIL*NFRAMES) errors = errors + 1;
+        if (vit_cycles == 0 || bdi_cycles == 0 || rs_cycles == 0 || pipe_cycles == 0) errors = errors + 1;
         if (errors == 0) $display("TEST PASSED"); else $display("TEST FAILED (%0d errors)", errors);
         $finish;
     end

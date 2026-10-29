@@ -71,6 +71,59 @@ button:disabled { opacity: .5; cursor: wait; }
 .bar span { display: block; height: 100%; background: var(--purple); }
 .hidden { display: none !important; }
 .empty { color: var(--muted); text-align: center; padding: 35px 10px; }
+.trace-container { max-width: 1680px; margin: 0 auto; padding: 22px 20px 50px; }
+.control-card { display: grid; grid-template-columns: minmax(280px, 1fr) 280px auto; gap: 14px; align-items: end; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.control-card .field { margin: 0; }
+.control-card textarea { min-height: 46px; height: 46px; resize: vertical; }
+.transmit-button { height: 46px; padding-inline: 22px; }
+.trace-container > .notice { margin: 14px 0; }
+.trace-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.received-card { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 14px; padding: 16px 18px; border: 1px solid #237858; border-radius: 14px; background: #0b211c; }
+.received-card > div { min-width: 0; }
+.received-label { display: block; margin-bottom: 5px; color: var(--green); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.received-card pre { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font: 16px/1.5 ui-monospace, Consolas, monospace; }
+.performance-panel { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+.performance-panel > summary { padding: 15px 18px; color: var(--blue); cursor: pointer; font-weight: 700; }
+.performance-panel[open] > summary { border-bottom: 1px solid var(--line); }
+.performance-controls { display: flex; align-items: end; gap: 12px; padding: 14px 18px 0; }
+.performance-controls label { margin: 0; }
+.performance-controls select { width: min(360px, 100%); }
+.performance-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 14px 18px; }
+.performance-summary > div { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #07111f; }
+.performance-summary span { display: block; color: var(--muted); font-size: 10px; }
+.performance-summary strong { display: block; margin-top: 5px; overflow-wrap: anywhere; color: var(--green); font: 700 15px ui-monospace, Consolas, monospace; }
+.performance-table-wrap { margin: 0 18px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+.performance-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.performance-table th, .performance-table td { padding: 10px 11px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.performance-table th { color: var(--muted); background: #07111f; font-weight: 650; }
+.performance-table th:first-child, .performance-table td:first-child, .performance-table td:nth-child(2) { text-align: left; }
+.performance-table tbody tr:last-child td { border-bottom: 0; }
+.performance-table td:not(:first-child) { font-family: ui-monospace, Consolas, monospace; }
+.performance-table .unavailable { color: var(--muted); text-align: center; font-family: inherit; }
+.performance-note { margin: 12px 18px 16px; color: var(--muted); font-size: 10px; }
+.trace-column { min-width: 0; border: 1px solid var(--line); border-radius: 15px; background: #091524; overflow: hidden; }
+.trace-column > header { display: flex; gap: 12px; align-items: center; padding: 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.trace-column > header > span { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 9px; background: #152a43; color: var(--blue); font: 700 12px ui-monospace, Consolas, monospace; }
+.trace-column h2 { margin: 0; font-size: 15px; }
+.trace-column header p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.software-column > header > span { color: var(--purple); background: #261c3c; }
+.board-column > header > span { color: var(--green); background: #0b2b22; }
+.stage-list { display: grid; gap: 10px; padding: 10px; }
+.stage-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: #07111f; }
+.stage-card.matched { border-color: #237858; }
+.stage-title { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.stage-title h3 { margin: 0; font-size: 13px; }
+.stage-number, .comparison { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: #14243a; font: 700 9px ui-monospace, Consolas, monospace; }
+.comparison.pass { color: var(--green); background: #0b2b22; }
+.comparison.fail { color: var(--red); background: #30171d; }
+.stage-source { margin: 4px 0 10px; color: var(--muted); font-size: 10px; }
+.stage-meta { display: grid; gap: 4px; margin-bottom: 8px; color: var(--muted); font: 9px/1.4 ui-monospace, Consolas, monospace; }
+.stage-meta span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-preview, .stage-full { margin: 0; padding: 10px; border-radius: 8px; background: #030914; color: #bcd7f2; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.45 ui-monospace, Consolas, monospace; }
+.stage-preview { max-height: 106px; overflow: auto; }
+.stage-card details { margin-top: 9px; }
+.stage-card summary { color: var(--blue); cursor: pointer; font-size: 10px; }
+.stage-full { max-height: 360px; margin-top: 8px; overflow: auto; }
 @media (max-width: 850px) {
   .app-header { align-items: flex-start; flex-wrap: wrap; }
   .brand { flex-basis: 100%; }
@@ -78,9 +131,17 @@ button:disabled { opacity: .5; cursor: wait; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .flow { grid-template-columns: repeat(2, 1fr); }
   .check-grid { grid-template-columns: 1fr; }
+  .control-card { grid-template-columns: 1fr 1fr; }
+  .input-field { grid-column: 1 / -1; }
+  .trace-columns { grid-template-columns: 1fr; }
+  .performance-summary { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 520px) {
   .container { padding: 18px 13px 34px; }
   .metrics, .flow { grid-template-columns: 1fr; }
   .status { width: 100%; justify-content: center; }
+  .control-card { grid-template-columns: 1fr; }
+  .input-field { grid-column: auto; }
+  .performance-summary { grid-template-columns: 1fr; }
+  .performance-controls { align-items: stretch; flex-direction: column; }
 }

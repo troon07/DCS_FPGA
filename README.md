@@ -65,26 +65,28 @@ The latest routed XC7Z010 implementation reports:
 | Metric | Measured value |
 | --- | ---: |
 | Implemented PL clock | 71.429 MHz |
-| Worst negative slack | +0.330 ns |
+| Worst negative slack | +0.233 ns |
 | Total negative slack | 0.000 ns |
-| Slice LUTs | 11,031 / 17,600 (62.68%) |
-| Slice registers | 5,788 / 35,200 (16.44%) |
+| Slice LUTs | 11,270 / 17,600 (64.03%) |
+| Slice registers | 5,990 / 35,200 (17.02%) |
 | Block RAM tiles | 50.5 / 60 (84.17%) |
 | DSPs | 1 / 80 (1.25%) |
 
 The full eight-mode COM5 sweep recovered every payload exactly, with zero
 hardware byte/bit mismatches, zero RS failures, and zero hardware-versus-
-software byte mismatches. The detailed build output, transaction evidence,
+software byte mismatches. TRC3 also returns real cycle counts for both PS
+stages, all three PL stages, the complete PL pipeline, and the three-pass trace
+operation. The detailed build output, transaction evidence,
 limitations, and parsed report lines are recorded in
 [`HARDWARE_STATUS_SUMMARY.md`](HARDWARE_STATUS_SUMMARY.md).
 
 ### Measurement boundary
 
-The measured `0.005–0.007 Mb/s` and `0.9–2.8 s` values are complete
-UART-to-UART host transactions. The present bridge sends coded bits as UART
-bytes at 115200 baud, so those numbers are transport-limited; they are **not**
-an internal FPGA decoder-throughput measurement. Individual PS/PL stage timing
-needs hardware counters, an AXI timer, or ILA instrumentation.
+The traced transactions take approximately `1.9–6.1 s` depending on mode and
+return all five board-stage buffers. The bridge sends coded bits and trace data
+as UART bytes at 115200 baud, so those numbers are transport-limited; they are **not**
+an internal FPGA decoder-throughput measurement. The UI keeps this wall-clock
+time separate from cycle-counter-derived PS/PL stage latency.
 
 ## Repository map
 
@@ -213,8 +215,8 @@ result when hardware is unavailable.
 - This project validates a receiver loopback, not an RF link. OFDM
   synchronization, channel estimation, demapping, and an RF front end are not
   included.
-- Add on-board cycle counters or AXI timer instrumentation to measure each
-  PS/PL stage independently.
+- Extend the runtime counters with separate active-versus-backpressure counts
+  if stall attribution is required beyond measured complete-block latency.
 - Replace the byte-per-coded-bit UART protocol with a higher-bandwidth transport
   for a meaningful end-to-end throughput measurement.
 - Add independent LDACS test vectors and controlled error campaigns to test

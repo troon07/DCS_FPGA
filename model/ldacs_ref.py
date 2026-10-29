@@ -301,14 +301,24 @@ def decode_frame(tx_bits, lay):
     vit_in = helical_deinterleave(tx_bits)
     bits = viterbi_decode(vit_in, lay["n_steps"], lay["rate"])
     data = bits_to_bytes(bits[:lay["num_cw"] * lay["rs_n"] * 8])
+    deinterleaved = b"".join(block_deinterleave(data, lay["num_cw"]))
     hw_out, n_corr, n_fail = bytearray(), 0, 0
-    for cw in block_deinterleave(data, lay["num_cw"]):
+    for offset in range(0, len(deinterleaved), lay["rs_n"]):
+        cw = deinterleaved[offset:offset + lay["rs_n"]]
         d, c, ok = rs_decode(cw)
         hw_out += d
         n_corr += c
         n_fail += 0 if ok else 1
-    return dict(vit_in=vit_in, hw_out=bytes(hw_out), payload=randomize(bytes(hw_out)),
-                n_corr=n_corr, n_fail=n_fail)
+    return dict(
+        vit_in=vit_in,
+        viterbi_bits=bits[:lay["num_cw"] * lay["rs_n"] * 8],
+        viterbi_bytes=data,
+        block_deinterleaved=deinterleaved,
+        hw_out=bytes(hw_out),
+        payload=randomize(bytes(hw_out)),
+        n_corr=n_corr,
+        n_fail=n_fail,
+    )
 
 def add_errors(bits, rng, ber=0.0, bursts=0, burst_len=0):
     out = list(bits)

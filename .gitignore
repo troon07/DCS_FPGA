@@ -13,6 +13,11 @@ vivado_board_query_project/
 *.str
 *.backup.*
 *.vvp
+xsim.dir/
+*.pb
+.analytics
+.metadata/
+RemoteSystemsTempFiles/
 
 # Locally built or captured board artifacts
 sw/ldacs_decode

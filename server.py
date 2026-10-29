@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from model.ldacs_engine import engine_instance
+from model.ldacs_engine import engine_instance, load_vivado_build_metrics
 
 PORT    = 8000
 WEB_DIR = os.path.join(BASE_DIR, "web")
@@ -79,6 +79,7 @@ class LDACSHandler(http.server.SimpleHTTPRequestHandler):
     def _api_status(self):
         last = engine_instance.last_result
         hw   = last["hw_active"] if last else engine_instance.hw_connected
+        routed = load_vivado_build_metrics(BASE_DIR).get("total") or {}
         self.send_json({
             "status": "connected" if hw else "hardware_not_verified",
             "hw_active": hw,
@@ -87,12 +88,13 @@ class LDACSHandler(http.server.SimpleHTTPRequestHandler):
             "com_port": "COM5",
             "baud": 115200,
             "clock_mhz": 71.429,
-            # Routed XC7Z010 Vivado utilization, from the current build report.
+            # Parsed from the current routed report; never a paper/reference value.
             "utilization": {
-                "lut_used": 11031, "lut_total": 17600, "lut_pct": 62.68,
-                "ff_used":  5788, "ff_total":  35200, "ff_pct": 16.44,
-                "bram_used": 50.5, "bram_total": 60, "bram_pct": 84.17,
-                "source": "Vivado 2022.2 routed XC7Z010 implementation",
+                "lut_used": routed.get("lut"),
+                "ff_used": routed.get("ff"),
+                "bram_used": routed.get("bram"),
+                "dsp_used": routed.get("dsp"),
+                "source": "Current Vivado routed XC7Z010 implementation report",
             },
             "last_measured": {
                 "throughput_mbps": last.get("throughput_mbps") if last else None,

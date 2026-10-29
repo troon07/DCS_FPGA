@@ -14,12 +14,15 @@
  *     [1 byte]  rs_n    : RS N (101)
  *     [n_coded bytes] raw encoded bits (0x00 or 0x01 per byte)
  *
- *   FPGA -> PC:
- *     [4 bytes] magic   = 0xACLD (0x41 0x43 0x4C 0x44)
- *     [2 bytes] n_out   : actual bytes returned
+ *   FPGA -> PC trace response:
+ *     [4 bytes] magic   = "TRC3" (0x54 0x52 0x43 0x33)
+ *     [2 bytes each] helical_len, viterbi_len, block_len, rs_len, final_len
  *     [2 bytes] rs_corr : RS corrections
  *     [2 bytes] rs_fail : RS failures
- *     [n_out bytes] decoded payload bytes
+ *     [4 bytes each] PS helical, PL Viterbi, PL block, PL RS, complete PL,
+ *                    PS derandomizer and board-processing clock cycles
+ *     [4 bytes] PL clock frequency in Hz
+ *     followed by the five real board stage buffers in that order
  *
  * Memory map (from Vivado address editor, confirmed via XSDB):
  *   AXI DMA base    : 0x40400000
@@ -121,6 +124,15 @@ static inline uint8_t  rreg8(uint32_t addr)              { return *(volatile uin
 #define DEC_RS_CORR     0x1C
 #define DEC_RS_FAIL     0x20
 #define DEC_VERSION     0x24
+#define DEC_TRACE_SEL   0x28
+#define DEC_VIT_CYCLES  0x2C
+#define DEC_BDI_CYCLES  0x30
+#define DEC_RS_CYCLES   0x34
+#define DEC_PIPE_CYCLES 0x38
+#define DEC_FREE_CYCLES 0x3C
+
+/* Actual FCLK_CLK0 frequency emitted by the current Vivado design. */
+#define PL_CLOCK_HZ     71428497u
 
 /* -----------------------------------------------------------------------
  * DMA buffers in DDR (1 MB-aligned, safe for bare-metal without MMU)
@@ -135,6 +147,9 @@ static inline uint8_t  rreg8(uint32_t addr)              { return *(volatile uin
 static volatile uint8_t *tx_buf = (volatile uint8_t *)DMA_TX_PHYS;
 static volatile uint8_t *rx_buf = (volatile uint8_t *)DMA_RX_PHYS;
 static uint8_t helical_buf[TX_BUF_MAX];
+static uint8_t viterbi_trace[RX_BUF_MAX];
+static uint8_t block_trace[RX_BUF_MAX];
+static uint8_t rs_trace[RX_BUF_MAX];
 
 /* -----------------------------------------------------------------------
  * UART helpers
@@ -173,6 +188,14 @@ static void uart_put_u16(uint16_t v)
     uart_putc((uint8_t)(v >> 8));
 }
 
+static void uart_put_u32(uint32_t v)
+{
+    uart_putc((uint8_t)(v & 0xFF));
+    uart_putc((uint8_t)((v >> 8) & 0xFF));
+    uart_putc((uint8_t)((v >> 16) & 0xFF));
+    uart_putc((uint8_t)((v >> 24) & 0xFF));
+}
+
 static uint16_t uart_get_u16(void)
 {
     uint8_t lo = uart_getc();
@@ -192,6 +215,11 @@ static void uart_read_buf(volatile uint8_t *buf, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
         buf[i] = uart_getc();
+}
+
+static void copy_from_dma(uint8_t *dst, const volatile uint8_t *src, uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i++) dst[i] = src[i];
 }
 
 /* -----------------------------------------------------------------------
@@ -233,6 +261,22 @@ static int dma_transfer(uint32_t tx_phys, uint32_t tx_len,
     return -2;  /* timeout */
 }
 
+static int run_decoder_tap(uint8_t mode, uint16_t n_coded, uint16_t n_steps,
+                           uint16_t num_cw, uint8_t rs_n, uint8_t trace_sel,
+                           uint16_t trace_len)
+{
+    wreg(DEC_BASE + DEC_CTRL, 0x1);
+    volatile int r = 0; for (r = 0; r < 1000; r++);
+    wreg(DEC_BASE + DEC_CTRL, 0x0);
+    wreg(DEC_BASE + DEC_RATE, mode);
+    wreg(DEC_BASE + DEC_N_STEPS, n_steps);
+    wreg(DEC_BASE + DEC_NUM_CW, num_cw);
+    wreg(DEC_BASE + DEC_RS_N, rs_n);
+    wreg(DEC_BASE + DEC_TRACE_SEL, trace_sel);
+    dma_reset();
+    return dma_transfer(DMA_TX_PHYS, n_coded, DMA_RX_PHYS, trace_len);
+}
+
 /* -----------------------------------------------------------------------
  * Send error response to PC
  * --------------------------------------------------------------------- */
@@ -259,7 +303,7 @@ void bridge_main(void)
 
     /* Verify decoder version */
     uint32_t ver = rreg(DEC_BASE + DEC_VERSION);
-    if (ver != 0x4C444331) {
+    if (ver != 0x4C444333) {
         /* Wrong bitstream - keep sending ERR until watchdog or reset */
         for (;;) send_error();
     }
@@ -289,9 +333,11 @@ void bridge_main(void)
         uint16_t n_steps = uart_get_u16();
         uint16_t num_cw  = uart_get_u16();
         uint8_t  rs_n    = uart_getc();
+        uint16_t n_rs    = (uint16_t)(num_cw * rs_n);
 
         /* Bounds check */
-        if (n_coded > TX_BUF_MAX || n_out > RX_BUF_MAX || n_coded == 0 || n_out == 0 ||
+        if (n_coded > TX_BUF_MAX || n_out > RX_BUF_MAX || n_rs > RX_BUF_MAX ||
+            n_coded == 0 || n_out == 0 ||
             (n_coded % LDACS_HELICAL_ROWS) != 0) {
             send_error();
             continue;
@@ -300,24 +346,26 @@ void bridge_main(void)
         /* PS stage 1: receive helical-interleaved bits, then deinterleave
          * into the DMA source buffer. */
         uart_read_buf(helical_buf, n_coded);
+        uint32_t board_start = rreg(DEC_BASE + DEC_FREE_CYCLES);
+        uint32_t helical_start = rreg(DEC_BASE + DEC_FREE_CYCLES);
         helical_deinterleave(helical_buf, (uint8_t *)tx_buf, n_coded);
+        uint32_t helical_cycles = rreg(DEC_BASE + DEC_FREE_CYCLES) - helical_start;
 
-        /* Configure LDACS decoder */
-        wreg(DEC_BASE + DEC_CTRL,    0x3);   /* reset + clear stats */
+        /* Capture real PL stage outputs with three executions of the exact
+         * same frame. Trace 1 stops after Viterbi packing, trace 2 stops after
+         * block deinterleaving, and trace 0 executes the full RS path. */
+        int ret = run_decoder_tap(mode, n_coded, n_steps, num_cw, rs_n, 1, n_rs);
+        if (ret != 0) { send_error(); continue; }
+        copy_from_dma(viterbi_trace, rx_buf, n_rs);
+
+        ret = run_decoder_tap(mode, n_coded, n_steps, num_cw, rs_n, 2, n_rs);
+        if (ret != 0) { send_error(); continue; }
+        copy_from_dma(block_trace, rx_buf, n_rs);
+
+        wreg(DEC_BASE + DEC_CTRL, 0x2); /* clear statistics before real RS run */
         volatile int r = 0; for (r = 0; r < 1000; r++);
-        wreg(DEC_BASE + DEC_CTRL,    0x0);
-        wreg(DEC_BASE + DEC_RATE,    (uint32_t)mode);
-        wreg(DEC_BASE + DEC_N_STEPS, (uint32_t)n_steps);
-        wreg(DEC_BASE + DEC_NUM_CW,  (uint32_t)num_cw);
-        wreg(DEC_BASE + DEC_RS_N,    (uint32_t)rs_n);
-
-        /* Reset DMA */
-        dma_reset();
-
-        /* Run DMA: TX buf -> decoder -> RX buf */
-        int ret = dma_transfer(DMA_TX_PHYS, (uint32_t)n_coded,
-                               DMA_RX_PHYS, (uint32_t)n_out);
-
+        wreg(DEC_BASE + DEC_CTRL, 0x0);
+        ret = run_decoder_tap(mode, n_coded, n_steps, num_cw, rs_n, 0, n_out);
         if (ret != 0) {
             send_error();
             continue;
@@ -326,15 +374,40 @@ void bridge_main(void)
         /* Read stats */
         uint16_t rs_corr = (uint16_t)(rreg(DEC_BASE + DEC_RS_CORR) & 0xFFFF);
         uint16_t rs_fail = (uint16_t)(rreg(DEC_BASE + DEC_RS_FAIL) & 0xFFFF);
+        uint32_t vit_cycles = rreg(DEC_BASE + DEC_VIT_CYCLES);
+        uint32_t bdi_cycles = rreg(DEC_BASE + DEC_BDI_CYCLES);
+        uint32_t rs_cycles = rreg(DEC_BASE + DEC_RS_CYCLES);
+        uint32_t pipe_cycles = rreg(DEC_BASE + DEC_PIPE_CYCLES);
+
+        copy_from_dma(rs_trace, rx_buf, n_out);
 
         /* PS stage 5: derandomize the FPGA's randomized payload in place. */
+        uint32_t derand_start = rreg(DEC_BASE + DEC_FREE_CYCLES);
         derandomize((const uint8_t *)rx_buf, (uint8_t *)rx_buf, n_out);
+        uint32_t derand_cycles = rreg(DEC_BASE + DEC_FREE_CYCLES) - derand_start;
+        uint32_t board_cycles = rreg(DEC_BASE + DEC_FREE_CYCLES) - board_start;
 
-        /* Send response: magic "ACLD" + n_out + rs_corr + rs_fail + payload */
-        uart_putc(0x41); uart_putc(0x43); uart_putc(0x4C); uart_putc(0x44);
+        /* Send response: magic "TRC3", metadata, measured cycles, buffers. */
+        uart_putc(0x54); uart_putc(0x52); uart_putc(0x43); uart_putc(0x33);
+        uart_put_u16(n_coded);
+        uart_put_u16(n_rs);
+        uart_put_u16(n_rs);
+        uart_put_u16(n_out);
         uart_put_u16(n_out);
         uart_put_u16(rs_corr);
         uart_put_u16(rs_fail);
+        uart_put_u32(helical_cycles);
+        uart_put_u32(vit_cycles);
+        uart_put_u32(bdi_cycles);
+        uart_put_u32(rs_cycles);
+        uart_put_u32(pipe_cycles);
+        uart_put_u32(derand_cycles);
+        uart_put_u32(board_cycles);
+        uart_put_u32(PL_CLOCK_HZ);
+        uart_write_buf(tx_buf, n_coded);
+        uart_write_buf(viterbi_trace, n_rs);
+        uart_write_buf(block_trace, n_rs);
+        uart_write_buf(rs_trace, n_out);
         uart_write_buf(rx_buf, n_out);
     }
 }
